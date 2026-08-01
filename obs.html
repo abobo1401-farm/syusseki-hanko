@@ -1,0 +1,27 @@
+<!doctype html><html lang="ja"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OBSハンコ通知</title><link rel="stylesheet" href="style.css">
+<style>html,body{background:transparent!important;overflow:hidden}</style>
+</head><body>
+<div class="obsWrap"><div id="notice" class="obsNotice">
+  <div id="stamp" class="bigStamp">🍎</div>
+  <h1 id="name">りんごさん</h1>
+  <h2 id="text">今日のハンコを押しました！</h2>
+</div></div>
+<script type="module">
+import {db,collection,query,orderBy,limit,onSnapshot} from "./common.js";
+const notice=document.querySelector("#notice");
+let first=true,lastId="";
+const q=query(collection(db,"events"),orderBy("createdAt","desc"),limit(1));
+onSnapshot(q,snap=>{
+ if(snap.empty)return;
+ const d=snap.docs[0],v=d.data();
+ if(first){first=false;lastId=d.id;return}
+ if(d.id===lastId||v.type!=="attendance")return;
+ lastId=d.id;
+ document.querySelector("#stamp").textContent=v.stampType||"🍎";
+ document.querySelector("#name").textContent=`${v.listenerName}さん`;
+ document.querySelector("#text").textContent="今日のハンコを押しました！";
+ notice.classList.remove("show");void notice.offsetWidth;notice.classList.add("show");
+});
+</script></body></html>

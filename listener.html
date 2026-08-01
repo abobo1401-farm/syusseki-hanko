@@ -1,0 +1,130 @@
+<!doctype html><html lang="ja"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>今日のりんごハンコ</title><link rel="stylesheet" href="style.css">
+</head><body><main class="shell">
+<h1>🍎 今日のりんごハンコ</h1>
+<p class="muted">初回だけお名前を登録します。次回からは出席ボタンを押すだけです。</p>
+<section class="panel">
+  <div id="nameSetup">
+    <div class="grid">
+      <label>名前を検索<input id="search" placeholder="名前・よみがな"></label>
+      <label>登録済みの名前<select id="listenerSelect"><option value="">選んでください</option></select></label>
+    </div>
+    <button id="rememberBtn" class="primary" style="width:100%;margin-top:10px">この端末に名前を記憶する</button>
+  </div>
+  <div id="rememberedName" class="message hidden"></div>
+  <button id="changeNameBtn" class="soft hidden" style="margin-top:8px">名前を変更する</button>
+  <div id="card" class="card">
+    <div class="cardHead"><strong id="cardName">お名前を選んでください</strong><span id="cardDate"></span></div>
+    <div class="tree"><div class="ground"></div><div class="trunk"></div><div class="crown">
+      <div class="leaf a"></div><div class="leaf b"></div><div class="leaf c"></div><div id="stampLayer"></div>
+    </div></div>
+  </div>
+  <button id="stampBtn" class="red" style="width:100%;font-size:20px">🍎 出席ハンコを押す</button>
+  <div id="message" class="message">お名前を選択してください。</div>
+</section>
+<script type="module">
+import {
+ db, auth, collection, doc, getDoc, getDocs, setDoc, addDoc, query, where, orderBy,
+ serverTimestamp, signInAnonymously, todayJst, monthOf, dayOf, periodOf, periodLabel, stampFor, escapeHtml
+} from "./common.js";
+
+const positions=[[35,108],[125,52],[222,105],[330,62],[80,165],[190,164],[300,155],[155,3],[265,15],[385,125],[20,178]];
+const today=todayJst(), month=monthOf(today), day=dayOf(today), period=periodOf(day);
+const select=document.querySelector("#listenerSelect"), search=document.querySelector("#search");
+const message=document.querySelector("#message"), layer=document.querySelector("#stampLayer");
+let listeners=[], selected=null, attendance=[];
+const SAVED_LISTENER_KEY = "appleStampSavedListenerId";
+
+document.querySelector("#cardDate").textContent=`${month.replace("-","年")}月 ${periodLabel(period)}`;
+
+await signInAnonymously(auth);
+await loadListeners();
+
+async function loadListeners(){
+ const q=query(collection(db,"listeners"),where("active","==",true),orderBy("kana"));
+ const snap=await getDocs(q);
+ listeners=snap.docs.map(d=>({id:d.id,...d.data()}));
+ renderOptions("");
+ const savedId = localStorage.getItem(SAVED_LISTENER_KEY);
+ const saved = listeners.find(v=>v.id===savedId);
+ if(saved){
+   selected=saved;
+   showRememberedMode();
+   await renderCard();
+ }
+}
+function renderOptions(word){
+ const w=word.trim().toLowerCase();
+ const filtered=listeners.filter(v=>(v.name+" "+(v.kana||"")).toLowerCase().includes(w));
+ select.innerHTML='<option value="">選んでください</option>'+filtered.map(v=>`<option value="${v.id}">${escapeHtml(v.name)}</option>`).join("");
+}
+search.addEventListener("input",()=>renderOptions(search.value));
+select.addEventListener("change",async()=>{
+ selected=listeners.find(v=>v.id===select.value)||null;
+ document.querySelector("#cardName").textContent=selected?`${selected.name}さんのカード`:"お名前を選んでください";
+ await renderCard();
+});
+
+document.querySelector("#rememberBtn").addEventListener("click", async()=>{
+ selected=listeners.find(v=>v.id===select.value)||null;
+ if(!selected){message.textContent="記憶するお名前を選んでください。";return}
+ localStorage.setItem(SAVED_LISTENER_KEY, selected.id);
+ showRememberedMode();
+ await renderCard();
+});
+
+document.querySelector("#changeNameBtn").addEventListener("click", ()=>{
+ localStorage.removeItem(SAVED_LISTENER_KEY);
+ selected=null;
+ document.querySelector("#nameSetup").classList.remove("hidden");
+ document.querySelector("#rememberedName").classList.add("hidden");
+ document.querySelector("#changeNameBtn").classList.add("hidden");
+ document.querySelector("#cardName").textContent="お名前を選んでください";
+ layer.innerHTML="";
+ message.textContent="新しいお名前を選び、この端末に記憶してください。";
+ document.querySelector("#stampBtn").disabled=true;
+});
+
+function showRememberedMode(){
+ document.querySelector("#nameSetup").classList.add("hidden");
+ document.querySelector("#rememberedName").classList.remove("hidden");
+ document.querySelector("#changeNameBtn").classList.remove("hidden");
+ document.querySelector("#rememberedName").textContent=`この端末の登録名：${selected.name}さん`;
+ document.querySelector("#cardName").textContent=`${selected.name}さんのカード`;
+}
+async function renderCard(){
+ layer.innerHTML="";
+ if(!selected){message.textContent="お名前を選択してください。";return}
+ const q=query(collection(db,"attendance"),where("listenerId","==",selected.id),where("month","==",month),where("period","==",period));
+ const snap=await getDocs(q);
+ attendance=snap.docs.map(d=>d.data()).sort((a,b)=>a.day-b.day);
+ attendance.forEach((a,i)=>{
+   const p=positions[i%positions.length], el=document.createElement("div");
+   el.className="stamp";el.style.left=p[0]+"px";el.style.top=p[1]+"px";
+   el.innerHTML=`${stampFor(i+1)}<small>${a.day}</small>`;layer.appendChild(el);
+ });
+ const id=`${today}_${selected.id}`;
+ const exists=await getDoc(doc(db,"attendance",id));
+ message.textContent=exists.exists()?"今日はすでにハンコ済みです。":"まだ今日のハンコを押していません。";
+ document.querySelector("#stampBtn").disabled=exists.exists();
+}
+document.querySelector("#stampBtn").addEventListener("click",async()=>{
+ if(!selected){message.textContent="先にお名前を選んでください。";return}
+ const id=`${today}_${selected.id}`, ref=doc(db,"attendance",id);
+ const existing=await getDoc(ref);
+ if(existing.exists()){message.textContent="今日はすでにハンコ済みです。";return}
+ const q=query(collection(db,"attendance"),where("listenerId","==",selected.id),where("month","==",month),where("period","==",period));
+ const snap=await getDocs(q); const count=snap.size+1, stamp=stampFor(count);
+ await setDoc(ref,{
+   listenerId:selected.id,listenerName:selected.name,date:today,month,day,period,
+   stampNo:count,stampType:stamp,createdAt:serverTimestamp()
+ });
+ await addDoc(collection(db,"events"),{
+   type:"attendance",listenerId:selected.id,listenerName:selected.name,date:today,
+   month,day,period,stampType:stamp,createdAt:serverTimestamp()
+ });
+ message.textContent=`${stamp} ハンコを押しました！ 今日もありがとう！`;
+ await renderCard();
+});
+</script></main></body></html>

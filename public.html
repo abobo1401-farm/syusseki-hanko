@@ -1,0 +1,24 @@
+<!doctype html><html lang="ja"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>りんごハンコ 出席まとめ</title><link rel="stylesheet" href="style.css">
+</head><body><main class="shell">
+<h1>🍎 りんごハンコ 出席まとめ</h1>
+<section class="panel">
+<div class="row"><label style="max-width:240px">表示する月<input id="month" type="month"></label><button id="reload" class="primary">表示</button></div>
+<p class="muted">出席回数の多い順に表示します。配信画面やスクリーンショットで公表できます。</p>
+<div id="summary"></div>
+</section>
+<script type="module">
+import {db,collection,getDocs,query,where,todayJst,monthOf,escapeHtml} from "./common.js";
+const m=document.querySelector("#month");m.value=monthOf(todayJst());
+document.querySelector("#reload").onclick=load;load();
+async function load(){
+ const snap=await getDocs(query(collection(db,"attendance"),where("month","==",m.value)));
+ const map={};
+ snap.forEach(d=>{const v=d.data();map[v.listenerId]??={name:v.listenerName,total:0,early:0,middle:0,late:0};map[v.listenerId].total++;map[v.listenerId][v.period]++});
+ const rows=Object.values(map).sort((a,b)=>b.total-a.total||a.name.localeCompare(b.name,"ja"));
+ document.querySelector("#summary").innerHTML=rows.length?`<table><thead><tr><th>順位</th><th>お名前</th><th>合計</th><th>上旬</th><th>中旬</th><th>下旬</th></tr></thead><tbody>${
+ rows.map((v,i)=>`<tr><td class="rank">${i+1}</td><td>${escapeHtml(v.name)}</td><td><b>${v.total}回</b></td><td>${v.early}</td><td>${v.middle}</td><td>${v.late}</td></tr>`).join("")
+ }</tbody></table>`:'<div class="message">この月の出席記録はまだありません。</div>';
+}
+</script></main></body></html>

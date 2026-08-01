@@ -1,0 +1,128 @@
+<!doctype html><html lang="ja"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>りんごハンコ管理</title><link rel="stylesheet" href="style.css">
+</head><body><main class="shell">
+<nav class="nav"><a href="listener.html">リスナー用</a><a href="public.html">公表ページ</a><a href="obs.html">OBS</a></nav>
+<h1>🛠️ りんごハンコ管理</h1>
+
+<section id="loginPanel" class="panel">
+<h2>管理者PIN</h2>
+<input id="pin" type="password" inputmode="numeric" maxlength="4" placeholder="4桁PIN">
+<button id="loginBtn" class="primary">管理画面を開く</button>
+<div id="loginMsg" class="message">管理者PINを入力してください。</div>
+</section>
+
+<div id="adminArea" class="hidden">
+<section class="panel">
+<div class="row"><h2 style="margin:0">リスナー登録</h2><button id="logoutBtn" class="soft">ログアウト</button></div>
+<div class="grid"><input id="newName" placeholder="表示名"><input id="newKana" placeholder="よみがな（あいうえお順用）"></div>
+<button id="addListener" class="primary">登録</button>
+<div class="list" id="listenerList"></div>
+</section>
+
+<section class="panel" style="margin-top:14px">
+<h2>出席記録の修正</h2>
+<div class="grid"><input id="attMonth" type="month"><select id="attListener"><option value="">リスナーを選択</option></select></div>
+<div id="attendanceList" class="list"></div>
+</section>
+
+<section class="panel" style="margin-top:14px">
+<h2>LFR挑戦履歴</h2>
+<div class="grid">
+<select id="lfrListener"><option value="">リスナーを選択</option></select>
+<input id="lfrDate" type="date">
+<select id="lfrResult"><option>成功</option><option>失敗</option><option>挑戦</option><option>その他</option></select>
+<input id="lfrMemo" placeholder="メモ">
+</div>
+<button id="addLfr" class="primary">履歴を追加</button>
+<div id="lfrList" class="list"></div>
+</section>
+</div>
+
+<script type="module">
+import {
+ db, auth, collection, doc, getDocs, addDoc, updateDoc, deleteDoc, query, where, orderBy,
+ serverTimestamp, signInAnonymously, todayJst, monthOf, escapeHtml
+} from "./common.js";
+
+const $=s=>document.querySelector(s);
+let listeners=[];
+
+$("#attMonth").value=monthOf(todayJst()); $("#lfrDate").value=todayJst();
+
+const ADMIN_PIN = "1401";
+await signInAnonymously(auth);
+
+function openAdmin(){
+ $("#loginPanel").classList.add("hidden");
+ $("#adminArea").classList.remove("hidden");
+ sessionStorage.setItem("appleAdminUnlocked","1");
+ loadListeners().then(loadAttendance).then(loadLfr);
+}
+$("#loginBtn").onclick=()=>{
+ if($("#pin").value===ADMIN_PIN){openAdmin()}
+ else{$("#loginMsg").textContent="PINが違います。";}
+};
+$("#pin").addEventListener("keydown",e=>{if(e.key==="Enter")$("#loginBtn").click()});
+$("#logoutBtn").onclick=()=>{
+ sessionStorage.removeItem("appleAdminUnlocked");
+ location.reload();
+};
+if(sessionStorage.getItem("appleAdminUnlocked")==="1") openAdmin();
+
+async function loadListeners(){
+ const snap=await getDocs(query(collection(db,"listeners"),orderBy("kana")));
+ listeners=snap.docs.map(d=>({id:d.id,...d.data()}));
+ const opts='<option value="">リスナーを選択</option>'+listeners.map(v=>`<option value="${v.id}">${escapeHtml(v.name)}</option>`).join("");
+ $("#attListener").innerHTML=opts;$("#lfrListener").innerHTML=opts;
+ $("#listenerList").innerHTML=listeners.map(v=>`<div class="item">
+   <div><b>${escapeHtml(v.name)}</b><div class="muted">${escapeHtml(v.kana||"")}${v.active===false?"・停止中":""}</div></div>
+   <div><button class="soft editListener" data-id="${v.id}">修正</button> <button class="danger delListener" data-id="${v.id}">削除</button></div>
+ </div>`).join("");
+ document.querySelectorAll(".editListener").forEach(b=>b.onclick=()=>editListener(b.dataset.id));
+ document.querySelectorAll(".delListener").forEach(b=>b.onclick=()=>removeListener(b.dataset.id));
+}
+$("#addListener").onclick=async()=>{
+ const name=$("#newName").value.trim(),kana=$("#newKana").value.trim();
+ if(!name||!kana)return alert("表示名とよみがなを入力してください");
+ await addDoc(collection(db,"listeners"),{name,kana,active:true,createdAt:serverTimestamp()});
+ $("#newName").value="";$("#newKana").value="";await loadListeners();
+};
+async function editListener(id){
+ const v=listeners.find(x=>x.id===id),name=prompt("表示名",v.name),kana=prompt("よみがな",v.kana||"");
+ if(name===null||kana===null)return;
+ const active=confirm("このリスナーを選択肢に表示しますか？\nOK＝表示、キャンセル＝停止");
+ await updateDoc(doc(db,"listeners",id),{name:name.trim(),kana:kana.trim(),active});await loadListeners();
+}
+async function removeListener(id){
+ if(!confirm("リスナー登録を削除しますか？出席履歴は残ります。"))return;
+ await deleteDoc(doc(db,"listeners",id));await loadListeners();
+}
+$("#attMonth").onchange=loadAttendance;$("#attListener").onchange=loadAttendance;
+async function loadAttendance(){
+ const month=$("#attMonth").value,id=$("#attListener").value;
+ if(!month||!id){$("#attendanceList").innerHTML='<div class="muted">月とリスナーを選択してください。</div>';return}
+ const snap=await getDocs(query(collection(db,"attendance"),where("listenerId","==",id),where("month","==",month)));
+ const rows=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>a.day-b.day);
+ $("#attendanceList").innerHTML=rows.length?rows.map(v=>`<div class="item"><div><b>${v.date}</b> ${v.stampType||""}<div class="muted">${v.period}</div></div><button class="danger delAtt" data-id="${v.id}">取り消す</button></div>`).join(""):'<div class="muted">記録がありません。</div>';
+ document.querySelectorAll(".delAtt").forEach(b=>b.onclick=async()=>{if(confirm("この日の出席を取り消しますか？")){await deleteDoc(doc(db,"attendance",b.dataset.id));await loadAttendance()}});
+}
+$("#addLfr").onclick=async()=>{
+ const id=$("#lfrListener").value,v=listeners.find(x=>x.id===id);
+ if(!v)return alert("リスナーを選択してください");
+ await addDoc(collection(db,"lfr"),{listenerId:id,listenerName:v.name,date:$("#lfrDate").value,result:$("#lfrResult").value,memo:$("#lfrMemo").value.trim(),createdAt:serverTimestamp()});
+ $("#lfrMemo").value="";await loadLfr();
+};
+async function loadLfr(){
+ const snap=await getDocs(query(collection(db,"lfr"),orderBy("date","desc")));
+ const rows=snap.docs.map(d=>({id:d.id,...d.data()}));
+ $("#lfrList").innerHTML=rows.map(v=>`<div class="item"><div><b>${escapeHtml(v.listenerName)}</b>｜${v.date}｜${escapeHtml(v.result)}<div class="muted">${escapeHtml(v.memo||"")}</div></div><div><button class="soft editLfr" data-id="${v.id}">修正</button> <button class="danger delLfr" data-id="${v.id}">削除</button></div></div>`).join("");
+ document.querySelectorAll(".editLfr").forEach(b=>b.onclick=()=>editLfr(rows.find(v=>v.id===b.dataset.id)));
+ document.querySelectorAll(".delLfr").forEach(b=>b.onclick=async()=>{if(confirm("削除しますか？")){await deleteDoc(doc(db,"lfr",b.dataset.id));await loadLfr()}});
+}
+async function editLfr(v){
+ const result=prompt("結果",v.result),memo=prompt("メモ",v.memo||"");
+ if(result===null||memo===null)return;
+ await updateDoc(doc(db,"lfr",v.id),{result,memo});await loadLfr();
+}
+</script></main></body></html>
