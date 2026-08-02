@@ -3,38 +3,35 @@
 <title>今日のりんごハンコ</title><link rel="stylesheet" href="style.css">
 </head><body><main class="shell">
 <h1>🍎 今日のりんごハンコ</h1>
-<p class="muted">初回だけお名前を登録します。次回からは出席ボタンを押すだけです。</p>
-<section class="panel">
-  <div id="nameSetup">
-    <h2 style="font-size:17px">① 登録ずみの方</h2>
-    <div class="grid">
-      <label>名前を検索<input id="search" placeholder="名前・よみがな"></label>
-      <label>登録済みの名前<select id="listenerSelect"><option value="">選んでください</option></select></label>
-    </div>
-    <button id="rememberBtn" class="primary" style="width:100%;margin-top:10px">この端末に名前を記憶する</button>
 
-    <div class="regBlock">
-      <h2 style="font-size:17px">② はじめての方</h2>
-      <p class="muted">一覧にお名前が無ければ、ここから登録できます。配信画面やまとめページに表示されます。</p>
-      <div class="grid">
-        <label>お名前<input id="regName" maxlength="20" placeholder="配信で呼ばれている名前"></label>
-        <label>よみがな（任意）<input id="regKana" maxlength="30" placeholder="ひらがなで（あいうえお順に使います）"></label>
-      </div>
-      <button id="regBtn" class="primary" style="width:100%;margin-top:10px">この名前で登録して記憶する</button>
-      <div id="regMsg" class="muted" style="margin-top:8px"></div>
+<section class="panel">
+  <!-- 初回だけ表示 -->
+  <div id="nameSetup">
+    <p class="muted">初回だけお名前を登録します。次回からは、この端末では出席ボタンを押すだけです。</p>
+    <div class="grid">
+      <label>お名前<input id="regName" maxlength="20" placeholder="配信で呼ばれている名前"></label>
+      <label>よみがな（任意）<input id="regKana" maxlength="30" placeholder="ひらがなで"></label>
     </div>
+    <button id="regBtn" class="primary" style="width:100%;margin-top:10px;font-size:18px">この名前で始める</button>
+    <div id="regMsg" class="muted" style="margin-top:8px"></div>
   </div>
-  <div id="rememberedName" class="message hidden"></div>
-  <button id="changeNameBtn" class="soft hidden" style="margin-top:8px">名前を変更する</button>
-  <div class="cardHead"><strong id="cardName">お名前を選んでください</strong><span id="cardDate"></span></div>
-  <div id="card" class="stampCard">
-    <img id="cardImg" class="cardImg" src="assets/card-early.png" alt="スタンプカード">
-    <div id="stampLayer" class="stampLayer"></div>
+
+  <!-- 登録後に表示 -->
+  <div id="stampArea" class="hidden">
+    <div id="rememberedName" class="message"></div>
+    <div class="cardHead"><strong id="cardName">お名前を登録してください</strong><span id="cardDate"></span></div>
+    <div id="card" class="stampCard">
+      <img id="cardImg" class="cardImg" src="assets/card-early.png" alt="スタンプカード">
+      <div id="stampLayer" class="stampLayer"></div>
+    </div>
+    <button id="stampBtn" class="red" style="width:100%;font-size:22px;padding:18px" disabled>🍎 出席ハンコを押す</button>
+    <div id="message" class="message">読み込み中…</div>
+    <button id="changeNameBtn" class="soft" style="margin-top:10px">名前を変更する</button>
   </div>
-  <button id="stampBtn" class="red" style="width:100%;font-size:20px" disabled>🍎 出席ハンコを押す</button>
-  <div id="message" class="message">お名前を選択してください。</div>
-  <p class="muted" id="rolloverNote"></p>
+
+  <p class="muted" id="rolloverNote" style="margin-top:12px"></p>
 </section>
+
 <script type="module">
 import {
  db, auth, collection, doc, getDoc, getDocs, setDoc, addDoc, query, where, orderBy,
@@ -44,8 +41,7 @@ import {
 } from "./common.js";
 
 const $ = s => document.querySelector(s);
-const select=$("#listenerSelect"), search=$("#search"), message=$("#message");
-const layer=$("#stampLayer"), stampBtn=$("#stampBtn"), cardImg=$("#cardImg");
+const message=$("#message"), layer=$("#stampLayer"), stampBtn=$("#stampBtn"), cardImg=$("#cardImg");
 const SAVED_LISTENER_KEY = "appleStampSavedListenerId";
 
 let listeners=[], allListeners=[], selected=null, ctx=null, busy=false;
@@ -53,7 +49,7 @@ let listeners=[], allListeners=[], selected=null, ctx=null, busy=false;
 /* 重複判定用：空白を取り除いて小文字化 */
 const normalize = s => String(s ?? "").replace(/[\s\u3000]/g,"").toLowerCase();
 
-/* assets が読み込めなかった場合の代替絵柄（マスが空になるのを防ぐ） */
+/* assets が読み込めなかった場合の代替絵柄 */
 const FALLBACK_STAMP = "data:image/svg+xml;utf8," + encodeURIComponent(
  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' +
  '<rect x="46" y="8" width="6" height="20" rx="3" fill="#755033"/>' +
@@ -62,14 +58,13 @@ const FALLBACK_STAMP = "data:image/svg+xml;utf8," + encodeURIComponent(
 
 /* 日付は「押した瞬間」に計算する。ページを開きっぱなしでも日付がずれない。 */
 function currentCtx(){
- const today = todayJst();
- const day = dayOf(today);
+ const today = todayJst(), day = dayOf(today);
  return { today, month: monthOf(today), day, period: periodOf(day) };
 }
 function refreshCtx(){
  ctx = currentCtx();
- $("#cardDate").textContent = `${ctx.month.replace("-","年")}月 ${periodLabel(ctx.period)}`;
  document.body.dataset.period = ctx.period;   // 旬に合わせて画面の色を切り替える
+ $("#cardDate").textContent = `${ctx.month.replace("-","年")}月 ${periodLabel(ctx.period)}`;
  const src = CARD_IMAGE[ctx.period];
  if(!cardImg.src.endsWith(src)) cardImg.src = src;
  $("#rolloverNote").textContent =
@@ -80,46 +75,35 @@ function refreshCtx(){
 }
 refreshCtx();
 
-/* 起動処理。イベント登録がすべて済んでから末尾で呼び出す。 */
-async function start(){
- try{
-   await signInAnonymously(auth);
-   await loadListeners();
- }catch(err){
-   console.error(err);
-   message.textContent = "読み込みに失敗しました。通信環境とFirebaseの設定を確認して、ページを再読み込みしてください。";
- }
-}
-
-/* activeでの絞り込みはJS側で行う（複合インデックス不要にするため） */
 async function loadListeners(){
  const snap = await getDocs(query(collection(db,"listeners"), orderBy("kana")));
  allListeners = snap.docs.map(d=>({id:d.id,...d.data()}));
  listeners = allListeners.filter(v=>v.active!==false);
- renderOptions("");
- const saved = listeners.find(v => v.id === localStorage.getItem(SAVED_LISTENER_KEY));
- if(saved){ selected = saved; showRememberedMode(); await renderCard(); }
 }
-function renderOptions(word){
- const w = word.trim().toLowerCase();
- const filtered = listeners.filter(v => (v.name+" "+(v.kana||"")).toLowerCase().includes(w));
- select.innerHTML = '<option value="">選んでください</option>' +
-   filtered.map(v=>`<option value="${v.id}">${escapeHtml(v.name)}</option>`).join("");
-}
-search.addEventListener("input", ()=>renderOptions(search.value));
-select.addEventListener("change", async()=>{
- selected = listeners.find(v=>v.id===select.value) || null;
- $("#cardName").textContent = selected ? `${selected.name}さんのカード` : "お名前を選んでください";
- await renderCard();
-});
 
-$("#rememberBtn").addEventListener("click", async()=>{
- selected = listeners.find(v=>v.id===select.value) || null;
- if(!selected){ message.textContent="記憶するお名前を選んでください。"; return }
- localStorage.setItem(SAVED_LISTENER_KEY, selected.id);
- showRememberedMode();
+/* 端末に記憶された名前があれば、そのままハンコ画面へ */
+function showStampMode(){
+ $("#nameSetup").classList.add("hidden");
+ $("#stampArea").classList.remove("hidden");
+ $("#rememberedName").textContent = `この端末の登録名：${selected.name}さん`;
+ $("#cardName").textContent = `${selected.name}さんのカード`;
+}
+function showSetupMode(){
+ $("#nameSetup").classList.remove("hidden");
+ $("#stampArea").classList.add("hidden");
+ $("#regName").value=""; $("#regKana").value=""; $("#regMsg").textContent="";
+ selected = null;
+}
+
+/* 名前を決めてハンコ画面へ進む */
+async function useListener(v, note){
+ selected = v;
+ localStorage.setItem(SAVED_LISTENER_KEY, v.id);
+ showStampMode();
  await renderCard();
-});
+ if(note) message.textContent = note;
+ stampBtn.scrollIntoView({behavior:"smooth", block:"center"});
+}
 
 $("#regBtn").addEventListener("click", async()=>{
  const btn = $("#regBtn"), msg = $("#regMsg");
@@ -128,17 +112,14 @@ $("#regBtn").addEventListener("click", async()=>{
  if(!name){ msg.textContent = "お名前を入力してください。"; return }
  if(name.length > 20){ msg.textContent = "お名前は20文字までです。"; return }
 
+ // 同じ名前がすでにあれば、それを使う（二重登録しない）
  const hit = allListeners.find(v => normalize(v.name) === normalize(name));
  if(hit){
    if(hit.active === false){
-     msg.textContent = "同じお名前が停止中です。配信のコメントで声をかけてください。";
+     msg.textContent = "このお名前は現在停止中です。配信のコメントで声をかけてください。";
      return;
    }
-   msg.textContent = "同じお名前がすでにあります。そちらを記憶しました。";
-   selected = listeners.find(v => v.id === hit.id) || hit;
-   localStorage.setItem(SAVED_LISTENER_KEY, selected.id);
-   showRememberedMode();
-   await renderCard();
+   await useListener(hit, `おかえりなさい、${hit.name}さん！`);
    return;
  }
 
@@ -147,14 +128,9 @@ $("#regBtn").addEventListener("click", async()=>{
    const ref = await addDoc(collection(db,"listeners"), {
      name, kana, active:true, selfRegistered:true, createdAt:serverTimestamp()
    });
-   localStorage.setItem(SAVED_LISTENER_KEY, ref.id);
    await loadListeners();
-   selected = listeners.find(v => v.id === ref.id) || { id:ref.id, name, kana };
-   showRememberedMode();
-   await renderCard();
-   msg.textContent = "";
-   $("#regName").value = ""; $("#regKana").value = "";
-   message.textContent = `${name}さん、登録できました。ハンコを押してください。`;
+   const v = listeners.find(x => x.id === ref.id) || { id:ref.id, name, kana };
+   await useListener(v, `${name}さん、登録できました。ハンコを押してください。`);
  }catch(err){
    console.error(err);
    msg.textContent = "登録できませんでした。通信環境を確認して、もう一度お試しください。";
@@ -164,32 +140,15 @@ $("#regBtn").addEventListener("click", async()=>{
 });
 
 $("#changeNameBtn").addEventListener("click", ()=>{
+ if(!confirm("この端末の登録名を消して、別の名前を登録しますか？\n出席の記録は消えません。")) return;
  localStorage.removeItem(SAVED_LISTENER_KEY);
- selected = null;
- search.value = "";
- renderOptions("");
- select.value = "";
- $("#regName").value = ""; $("#regKana").value = ""; $("#regMsg").textContent = "";
- $("#nameSetup").classList.remove("hidden");
- $("#rememberedName").classList.add("hidden");
- $("#changeNameBtn").classList.add("hidden");
- $("#cardName").textContent = "お名前を選んでください";
  layer.innerHTML = "";
- message.textContent = "新しいお名前を選び、この端末に記憶してください。";
- stampBtn.disabled = true;
+ showSetupMode();
 });
-
-function showRememberedMode(){
- $("#nameSetup").classList.add("hidden");
- $("#rememberedName").classList.remove("hidden");
- $("#changeNameBtn").classList.remove("hidden");
- $("#rememberedName").textContent = `この端末の登録名：${selected.name}さん`;
- $("#cardName").textContent = `${selected.name}さんのカード`;
-}
 
 async function renderCard(keepMessage=false){
  layer.innerHTML = "";
- if(!selected){ message.textContent="お名前を選択してください。"; stampBtn.disabled=true; return }
+ if(!selected){ stampBtn.disabled=true; return }
  refreshCtx();
  try{
    const snap = await getDocs(query(collection(db,"attendance"),
@@ -197,19 +156,21 @@ async function renderCard(keepMessage=false){
    const cells = CARD_CELLS[ctx.period] || {};
    snap.docs.map(d=>d.data()).sort((a,b)=>a.day-b.day).forEach(a=>{
      const cell = cells[a.day];
-     if(!cell) return;                       // 台紙にマスが無い日は描かない
+     if(!cell) return;
      const [x,y,,h] = cell;
      const el = document.createElement("img");
      el.className = "stamp";
      el.src = STAMP_IMAGE;
      el.alt = `${a.day}日 出席`;
-     el.onerror = ()=>{ el.onerror=null; el.src=FALLBACK_STAMP; console.warn("assets/apple-stamp.png を読み込めませんでした"); };
+     el.onerror = ()=>{ el.onerror=null; el.src=FALLBACK_STAMP; };
      el.style.left = x+"%"; el.style.top = y+"%"; el.style.height = (h*0.94)+"%";
      if(a.date === ctx.today) el.classList.add("justStamped");
      layer.appendChild(el);
    });
    const done = (await getDoc(doc(db,"attendance",`${ctx.today}_${selected.id}`))).exists();
-   if(!keepMessage) message.textContent = done ? "今日はすでにハンコ済みです。" : "まだ今日のハンコを押していません。";
+   if(!keepMessage) message.textContent = done
+     ? "今日はもうハンコを押しています。また明日！"
+     : "まだ今日のハンコを押していません。";
    stampBtn.disabled = done || busy;
  }catch(err){
    console.error(err);
@@ -219,8 +180,7 @@ async function renderCard(keepMessage=false){
 }
 
 stampBtn.addEventListener("click", async()=>{
- if(busy) return;
- if(!selected){ message.textContent="先にお名前を選んでください。"; return }
+ if(busy || !selected) return;
  busy = true;
  stampBtn.disabled = true;              // 連打による二重登録を防ぐ
  let stamped = false;
@@ -228,7 +188,7 @@ stampBtn.addEventListener("click", async()=>{
    refreshCtx();
    const { today, month, day, period } = ctx;
    const ref = doc(db,"attendance",`${today}_${selected.id}`);
-   if((await getDoc(ref)).exists()){ message.textContent="今日はすでにハンコ済みです。"; return }
+   if((await getDoc(ref)).exists()){ message.textContent="今日はもうハンコを押しています。また明日！"; return }
    const snap = await getDocs(query(collection(db,"attendance"),
      where("listenerId","==",selected.id), where("month","==",month), where("period","==",period)));
    const count = snap.size + 1, stamp = stampFor();
@@ -242,22 +202,39 @@ stampBtn.addEventListener("click", async()=>{
    });
    stamped = true;
    playStampSound(0.5);
-   message.textContent = "🍎 ハンコを押しました！ 今日もありがとう！";
+   message.textContent = `🍎 ${day}日のハンコを押しました！ 今日もありがとう！`;
  }catch(err){
    console.error(err);
    message.textContent = "保存できませんでした。通信環境を確認して、もう一度押してください。";
  }finally{
    busy = false;
-   await renderCard(stamped);   // 成功メッセージを消さない
+   await renderCard(stamped);
  }
 });
 
 /* 開きっぱなしでも日付の切り替わりに追従する */
 setInterval(async()=>{
- if(busy) return;
+ if(busy || !selected) return;
  if(currentCtx().today !== ctx.today) await renderCard();
 }, 30000);
 
 /* 起動（イベント登録がすべて済んでから実行する） */
+async function start(){
+ try{
+   await signInAnonymously(auth);
+   await loadListeners();
+   const saved = listeners.find(v => v.id === localStorage.getItem(SAVED_LISTENER_KEY));
+   if(saved){
+     selected = saved;
+     showStampMode();
+     await renderCard();
+   }else{
+     showSetupMode();
+   }
+ }catch(err){
+   console.error(err);
+   $("#regMsg").textContent = "読み込みに失敗しました。通信環境を確認して、ページを再読み込みしてください。";
+ }
+}
 start();
 </script></main></body></html>
