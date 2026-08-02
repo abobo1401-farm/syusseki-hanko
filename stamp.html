@@ -35,7 +35,7 @@ import {
  db, auth, collection, doc, getDoc, getDocs, setDoc, addDoc, deleteDoc, query, where, orderBy,
  serverTimestamp, signInAnonymously, todayJst, calendarTodayJst, monthOf, dayOf,
  periodOf, periodLabel, stampFor, escapeHtml, DAY_ROLLOVER_HOUR,
- STAMP_IMAGE, CARD_IMAGE, CARD_CELLS
+ STAMP_IMAGE, STAMP_IMAGE_GOLD, GOLD_FROM, stampImageFor, CARD_IMAGE, CARD_CELLS
 } from "./common.js";
 
 const $ = s => document.querySelector(s);
@@ -43,10 +43,10 @@ const select=$("#listenerSelect"), message=$("#message");
 const layer=$("#stampLayer"), stampBtn=$("#stampBtn"), cardImg=$("#cardImg"), card=$("#card");
 let listeners=[], todayRows=[], selected=null, ctx=null, busy=false;
 
-const FALLBACK_STAMP = "data:image/svg+xml;utf8," + encodeURIComponent(
+const fallbackStamp = (no=1) => "data:image/svg+xml;utf8," + encodeURIComponent(
  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' +
  '<rect x="46" y="8" width="6" height="20" rx="3" fill="#755033"/>' +
- '<circle cx="50" cy="58" r="38" fill="#d94c4c"/>' +
+ `<circle cx="50" cy="58" r="38" fill="${no >= GOLD_FROM ? "#f5d020" : "#d94c4c"}"/>` +
  '<ellipse cx="36" cy="45" rx="9" ry="13" fill="#fff" opacity=".35"/></svg>');
 
 function currentCtx(){
@@ -108,13 +108,14 @@ async function renderCard(keepMessage=false, animateDay=null){
    const snap = await getDocs(query(collection(db,"attendance"),
      where("listenerId","==",selected.id), where("month","==",ctx.month), where("period","==",ctx.period)));
    const cells = CARD_CELLS[ctx.period] || {};
-   snap.docs.map(d=>d.data()).sort((a,b)=>a.day-b.day).forEach(a=>{
+   snap.docs.map(d=>d.data()).sort((a,b)=>a.day-b.day).forEach((a,i)=>{
+     const no = i + 1;                        // カード内での通し番号（1個目、2個目…）
      const cell = cells[a.day];
      if(!cell) return;
      const [x,y,,h] = cell;
      const el = document.createElement("img");
-     el.className = "stamp"; el.src = STAMP_IMAGE; el.alt = `${a.day}日 出席`;
-     el.onerror = ()=>{ el.onerror=null; el.src=FALLBACK_STAMP; };
+     el.className = "stamp"; el.src = stampImageFor(no); el.alt = `${a.day}日 出席（${no}個目）`;
+     el.onerror = ()=>{ el.onerror=null; el.src=fallbackStamp(no); };
      el.style.left = x+"%"; el.style.top = y+"%"; el.style.height = (h*0.94)+"%";
      if(a.day === animateDay){
        el.classList.add("dropIn");

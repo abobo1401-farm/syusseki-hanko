@@ -65,9 +65,15 @@ export const periodLabel = p => ({ early: "上旬", middle: "中旬", late: "下
 /* ===== ハンコの絵柄 =====
    1種類に統一しています。枚数による絵柄の変化はありません。
    差し替えるときは assets/apple-stamp.png を置き換えてください。 */
-export const STAMP_ICON = "🍎";                       // 記録用の文字ラベル（管理画面などの表示に使用）
-export const STAMP_IMAGE = "assets/apple-stamp.png";  // 実際に表示するイラスト
+export const STAMP_ICON = "🍎";                            // 記録用の文字ラベル（管理画面などの表示に使用）
+export const STAMP_IMAGE = "assets/apple-stamp.png";       // 1〜4個目：赤りんご
+export const STAMP_IMAGE_GOLD = "assets/apple-stamp-gold.png"; // 5個目以降：金りんご
+export const GOLD_FROM = 5;                                // 何個目から金にするか
 export const stampFor = () => STAMP_ICON;
+
+/* 何個目かを渡すと、その番号にふさわしい絵柄を返す。
+   番号はカード（旬）ごとに1から数え直します。 */
+export const stampImageFor = n => (n >= GOLD_FROM ? STAMP_IMAGE_GOLD : STAMP_IMAGE);
 
 /* ===== スタンプカードの台紙 ===== */
 export const CARD_IMAGE = {
