@@ -99,13 +99,36 @@ button:disabled{opacity:.45;cursor:not-allowed}
   position:absolute;transform:translate(-50%,-50%);width:auto;pointer-events:none;
   filter:drop-shadow(0 4px 3px rgba(91,63,46,.3))
 }
-.stamp.justStamped{animation:stampDrop .5s cubic-bezier(.2,1.5,.4,1) both}
-@keyframes stampDrop{
-  0%{opacity:0;transform:translate(-50%,-50%) scale(2.4) rotate(-16deg)}
-  70%{opacity:1;transform:translate(-50%,-50%) scale(.9) rotate(4deg)}
+/* ===== 押した瞬間の演出（OBS通知と同じ動き） ===== */
+.stamp.dropIn{animation:stampDropIn .55s cubic-bezier(.2,1.5,.35,1) .05s both}
+@keyframes stampDropIn{
+  0%{opacity:0;transform:translate(-50%,-50%) scale(3.8) rotate(-24deg)}
+  35%{opacity:1}
+  62%{opacity:1;transform:translate(-50%,-50%) scale(.84) rotate(6deg)}
+  82%{transform:translate(-50%,-50%) scale(1.07) rotate(-2deg)}
   100%{opacity:1;transform:translate(-50%,-50%) scale(1) rotate(0)}
 }
-@media(prefers-reduced-motion:reduce){.stamp.justStamped{animation:none}}
+/* 着地の衝撃波 */
+.impactRing{
+  position:absolute;transform:translate(-50%,-50%);
+  width:9%;aspect-ratio:1;border-radius:50%;
+  border:7px solid var(--accent,#ff5f7e);opacity:0;
+  animation:impactRing .65s ease-out .3s both;pointer-events:none
+}
+@keyframes impactRing{
+  0%{opacity:.95;transform:translate(-50%,-50%) scale(.25)}
+  100%{opacity:0;transform:translate(-50%,-50%) scale(3.4)}
+}
+/* 着地に合わせてカードが沈む */
+.stampCard.hit{animation:cardHitShake .45s ease .25s both}
+@keyframes cardHitShake{
+  0%,100%{transform:translateY(0) scale(1)}
+  18%{transform:translateY(7px) scale(1.015)}
+  48%{transform:translateY(-4px) scale(.998)}
+}
+@media(prefers-reduced-motion:reduce){
+  .stamp.dropIn,.impactRing,.stampCard.hit{animation-duration:.01s;animation-delay:0s}
+}
 
 /* ===== メッセージ ===== */
 .message{

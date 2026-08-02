@@ -37,11 +37,11 @@ import {
  db, auth, collection, doc, getDoc, getDocs, setDoc, addDoc, query, where, orderBy,
  serverTimestamp, signInAnonymously, todayJst, calendarTodayJst, monthOf, dayOf,
  periodOf, periodLabel, stampFor, escapeHtml, DAY_ROLLOVER_HOUR,
- STAMP_IMAGE, CARD_IMAGE, CARD_CELLS, playStampSound
+ STAMP_IMAGE, CARD_IMAGE, CARD_CELLS, playStampSound, audioCtx
 } from "./common.js";
 
 const $ = s => document.querySelector(s);
-const message=$("#message"), layer=$("#stampLayer"), stampBtn=$("#stampBtn"), cardImg=$("#cardImg");
+const message=$("#message"), layer=$("#stampLayer"), stampBtn=$("#stampBtn"), cardImg=$("#cardImg"), card=$("#card");
 const SAVED_LISTENER_KEY = "appleStampSavedListenerId";
 
 let listeners=[], allListeners=[], selected=null, ctx=null, busy=false;
@@ -146,7 +146,7 @@ $("#changeNameBtn").addEventListener("click", ()=>{
  showSetupMode();
 });
 
-async function renderCard(keepMessage=false){
+async function renderCard(keepMessage=false, animateDay=null){
  layer.innerHTML = "";
  if(!selected){ stampBtn.disabled=true; return }
  refreshCtx();
@@ -164,7 +164,14 @@ async function renderCard(keepMessage=false){
      el.alt = `${a.day}日 出席`;
      el.onerror = ()=>{ el.onerror=null; el.src=FALLBACK_STAMP; };
      el.style.left = x+"%"; el.style.top = y+"%"; el.style.height = (h*0.94)+"%";
-     if(a.date === ctx.today) el.classList.add("justStamped");
+     if(a.day === animateDay){
+       el.classList.add("dropIn");
+       const ring = document.createElement("div");
+       ring.className = "impactRing";
+       ring.style.left = x+"%"; ring.style.top = y+"%";
+       layer.appendChild(ring);
+       card.classList.remove("hit"); void card.offsetWidth; card.classList.add("hit");
+     }
      layer.appendChild(el);
    });
    const done = (await getDoc(doc(db,"attendance",`${ctx.today}_${selected.id}`))).exists();
@@ -183,7 +190,8 @@ stampBtn.addEventListener("click", async()=>{
  if(busy || !selected) return;
  busy = true;
  stampBtn.disabled = true;              // 連打による二重登録を防ぐ
- let stamped = false;
+ try{ audioCtx() }catch(err){}          // タップの瞬間に音声を起こす（初回無音の対策）
+ let stamped = false, stampedDay = null;
  try{
    refreshCtx();
    const { today, month, day, period } = ctx;
@@ -200,15 +208,15 @@ stampBtn.addEventListener("click", async()=>{
      type:"attendance", listenerId:selected.id, listenerName:selected.name, date:today,
      month, day, period, stampType:stamp, createdAt:serverTimestamp()
    });
-   stamped = true;
-   playStampSound(0.5);
+   stamped = true; stampedDay = day;
+   setTimeout(()=>playStampSound(0.5), 330);   // 着地の瞬間に合わせる
    message.textContent = `🍎 ${day}日のハンコを押しました！ 今日もありがとう！`;
  }catch(err){
    console.error(err);
    message.textContent = "保存できませんでした。通信環境を確認して、もう一度押してください。";
  }finally{
    busy = false;
-   await renderCard(stamped);
+   await renderCard(stamped, stamped ? stampedDay : null);
  }
 });
 
