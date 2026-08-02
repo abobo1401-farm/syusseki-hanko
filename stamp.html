@@ -1,0 +1,210 @@
+<!doctype html><html lang="ja"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>出席ハンコ操作</title><link rel="stylesheet" href="style.css">
+</head><body><main class="shell">
+<nav class="nav"><a href="admin.html">管理画面</a><a href="public.html">公表ページ</a><a href="obs.html">OBS</a><a href="listener.html">リスナー用</a></nav>
+<h1>🍎 出席ハンコ操作</h1>
+
+<div id="opArea">
+<section class="panel">
+  <h2 style="margin:0 0 10px">出席を記録</h2>
+  <label>リスナーを選ぶ
+    <select id="listenerSelect"><option value="">選んでください</option></select>
+  </label>
+  <button id="stampBtn" class="red" style="width:100%;font-size:20px;margin-top:10px" disabled>🍎 出席ハンコを押す</button>
+  <div id="message" class="message">リスナーを選んでください。</div>
+  <p class="muted" id="rolloverNote"></p>
+</section>
+
+<section class="panel" style="margin-top:14px">
+  <div class="cardHead"><strong id="cardName">リスナーを選んでください</strong><span id="cardDate"></span></div>
+  <div class="stampCard">
+    <img id="cardImg" class="cardImg" src="assets/card-early.png" alt="スタンプカード">
+    <div id="stampLayer" class="stampLayer"></div>
+  </div>
+</section>
+
+<section class="panel" style="margin-top:14px">
+  <div class="row"><h2 style="margin:0">今日の出席</h2><span id="todayCount" class="muted"></span></div>
+  <div id="todayList" class="list"></div>
+</section>
+</div>
+
+<script type="module">
+import {
+ db, auth, collection, doc, getDoc, getDocs, setDoc, addDoc, deleteDoc, query, where, orderBy,
+ serverTimestamp, signInAnonymously, todayJst, calendarTodayJst, monthOf, dayOf,
+ periodOf, periodLabel, stampFor, escapeHtml, DAY_ROLLOVER_HOUR,
+ STAMP_IMAGE, CARD_IMAGE, CARD_CELLS
+} from "./common.js";
+
+const $ = s => document.querySelector(s);
+const select=$("#listenerSelect"), message=$("#message");
+const layer=$("#stampLayer"), stampBtn=$("#stampBtn"), cardImg=$("#cardImg");
+let listeners=[], todayRows=[], selected=null, ctx=null, busy=false;
+
+const FALLBACK_STAMP = "data:image/svg+xml;utf8," + encodeURIComponent(
+ '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' +
+ '<rect x="46" y="8" width="6" height="20" rx="3" fill="#755033"/>' +
+ '<circle cx="50" cy="58" r="38" fill="#d94c4c"/>' +
+ '<ellipse cx="36" cy="45" rx="9" ry="13" fill="#fff" opacity=".35"/></svg>');
+
+function currentCtx(){
+ const today = todayJst(), day = dayOf(today);
+ return { today, month: monthOf(today), day, period: periodOf(day) };
+}
+function refreshCtx(){
+ ctx = currentCtx();
+ $("#cardDate").textContent = `${ctx.month.replace("-","年")}月 ${periodLabel(ctx.period)}`;
+ document.body.dataset.period = ctx.period;   // 旬に合わせて画面の色を切り替える
+ const src = CARD_IMAGE[ctx.period];
+ if(!cardImg.src.endsWith(src)) cardImg.src = src;
+ $("#rolloverNote").textContent =
+   ctx.today === calendarTodayJst()
+     ? `記録される日付：${ctx.today}`
+     : `記録される日付：${ctx.today}（${DAY_ROLLOVER_HOUR}時を過ぎたので翌日分になります）`;
+ return ctx;
+}
+refreshCtx();
+
+/* ロックなし。開いたらそのまま使えます。 */
+async function start(){
+ try{
+   await signInAnonymously(auth);
+   await loadListeners();
+   await loadToday();
+   renderOptions();
+ }catch(err){
+   console.error(err);
+   message.textContent = "読み込みに失敗しました。通信環境とFirebaseの設定を確認してください。";
+ }
+}
+
+async function loadListeners(){
+ const snap = await getDocs(query(collection(db,"listeners"), orderBy("kana")));
+ listeners = snap.docs.map(d=>({id:d.id,...d.data()})).filter(v=>v.active!==false);
+}
+
+/* 今日すでに押した人には ✓ を付ける */
+function renderOptions(){
+ const done = new Set(todayRows.map(v=>v.listenerId));
+ const keep = select.value;
+ select.innerHTML = '<option value="">選んでください</option>' +
+   listeners.map(v=>`<option value="${v.id}">${done.has(v.id)?"✓ ":""}${escapeHtml(v.name)}</option>`).join("");
+ select.value = keep;
+}
+
+select.addEventListener("change", async()=>{
+ selected = listeners.find(v=>v.id===select.value) || null;
+ $("#cardName").textContent = selected ? `${selected.name}さんのカード` : "リスナーを選んでください";
+ await renderCard();
+});
+
+async function renderCard(keepMessage=false){
+ layer.innerHTML = "";
+ if(!selected){ message.textContent="リスナーを選んでください。"; stampBtn.disabled=true; return }
+ refreshCtx();
+ try{
+   const snap = await getDocs(query(collection(db,"attendance"),
+     where("listenerId","==",selected.id), where("month","==",ctx.month), where("period","==",ctx.period)));
+   const cells = CARD_CELLS[ctx.period] || {};
+   snap.docs.map(d=>d.data()).sort((a,b)=>a.day-b.day).forEach(a=>{
+     const cell = cells[a.day];
+     if(!cell) return;
+     const [x,y,,h] = cell;
+     const el = document.createElement("img");
+     el.className = "stamp"; el.src = STAMP_IMAGE; el.alt = `${a.day}日 出席`;
+     el.onerror = ()=>{ el.onerror=null; el.src=FALLBACK_STAMP; };
+     el.style.left = x+"%"; el.style.top = y+"%"; el.style.height = (h*0.94)+"%";
+     if(a.date === ctx.today) el.classList.add("justStamped");
+     layer.appendChild(el);
+   });
+   const done = (await getDoc(doc(db,"attendance",`${ctx.today}_${selected.id}`))).exists();
+   if(!keepMessage) message.textContent = done
+     ? `${selected.name}さんは今日すでに押しています。`
+     : `${selected.name}さんの出席を記録できます。`;
+   stampBtn.disabled = done || busy;
+ }catch(err){
+   console.error(err);
+   message.textContent = "カードの読み込みに失敗しました。ページを再読み込みしてください。";
+   stampBtn.disabled = true;
+ }
+}
+
+stampBtn.addEventListener("click", async()=>{
+ if(busy || !selected) return;
+ busy = true; stampBtn.disabled = true;
+ let stamped = false;
+ try{
+   refreshCtx();
+   const { today, month, day, period } = ctx;
+   const ref = doc(db,"attendance",`${today}_${selected.id}`);
+   if((await getDoc(ref)).exists()){
+     message.textContent = `${selected.name}さんは今日すでに押しています。`;
+     return;
+   }
+   const snap = await getDocs(query(collection(db,"attendance"),
+     where("listenerId","==",selected.id), where("month","==",month), where("period","==",period)));
+   const count = snap.size + 1, stamp = stampFor();
+   await setDoc(ref,{
+     listenerId:selected.id, listenerName:selected.name, date:today, month, day, period,
+     stampNo:count, stampType:stamp, createdAt:serverTimestamp()
+   });
+   await addDoc(collection(db,"events"),{
+     type:"attendance", listenerId:selected.id, listenerName:selected.name, date:today,
+     month, day, period, stampType:stamp, createdAt:serverTimestamp()
+   });
+   stamped = true;
+   message.textContent = `🍎 ${selected.name}さんにハンコを押しました！`;
+ }catch(err){
+   console.error(err);
+   message.textContent = "保存できませんでした。通信環境を確認して、もう一度押してください。";
+ }finally{
+   busy = false;
+   await renderCard(stamped);
+   await loadToday();
+   renderOptions();
+ }
+});
+
+/* ===== 今日の出席一覧（押し間違いの取り消し用） ===== */
+async function loadToday(){
+ refreshCtx();
+ try{
+   const snap = await getDocs(query(collection(db,"attendance"), where("date","==",ctx.today)));
+   todayRows = snap.docs.map(d=>({id:d.id,...d.data()}))
+     .sort((a,b)=>String(a.listenerName).localeCompare(String(b.listenerName),"ja"));
+ }catch(err){
+   console.error(err); todayRows = [];
+ }
+ $("#todayCount").textContent = `${ctx.today}／${todayRows.length}人`;
+ $("#todayList").innerHTML = todayRows.length
+   ? todayRows.map(v=>`<div class="item"><div><b>${escapeHtml(v.listenerName)}</b><div class="muted">${v.stampNo}枚目</div></div><button class="danger undo" data-id="${v.id}" data-listener="${escapeHtml(v.listenerId)}" data-name="${escapeHtml(v.listenerName)}">取り消す</button></div>`).join("")
+   : '<div class="muted">まだ誰も押していません。</div>';
+ document.querySelectorAll(".undo").forEach(b => b.onclick = async()=>{
+   if(!confirm(`${b.dataset.name}さんの今日の出席を取り消しますか？`)) return;
+   b.disabled = true;
+   try{
+     await deleteDoc(doc(db,"attendance",b.dataset.id));
+     const evs = await getDocs(query(collection(db,"events"),
+       where("listenerId","==",b.dataset.listener), where("date","==",ctx.today)));
+     await Promise.all(evs.docs.map(d=>deleteDoc(doc(db,"events",d.id))));
+     message.textContent = `${b.dataset.name}さんの出席を取り消しました。`;
+   }catch(err){
+     console.error(err); alert("取り消しに失敗しました。もう一度お試しください。");
+   }
+   await loadToday();
+   renderOptions();
+   await renderCard(true);
+ });
+}
+
+/* 日付が切り替わったら今日の一覧を作り直す */
+setInterval(async()=>{
+ if(busy) return;
+ if(currentCtx().today !== ctx.today){ await loadToday(); renderOptions(); await renderCard(); }
+}, 30000);
+
+/* 起動（イベント登録がすべて済んでから実行する） */
+start();
+</script></main></body></html>

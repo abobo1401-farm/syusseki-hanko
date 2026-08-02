@@ -53,6 +53,13 @@ let listeners=[], allListeners=[], selected=null, ctx=null, busy=false;
 /* 重複判定用：空白を取り除いて小文字化 */
 const normalize = s => String(s ?? "").replace(/[\s\u3000]/g,"").toLowerCase();
 
+/* assets が読み込めなかった場合の代替絵柄（マスが空になるのを防ぐ） */
+const FALLBACK_STAMP = "data:image/svg+xml;utf8," + encodeURIComponent(
+ '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' +
+ '<rect x="46" y="8" width="6" height="20" rx="3" fill="#755033"/>' +
+ '<circle cx="50" cy="58" r="38" fill="#d94c4c"/>' +
+ '<ellipse cx="36" cy="45" rx="9" ry="13" fill="#fff" opacity=".35"/></svg>');
+
 /* 日付は「押した瞬間」に計算する。ページを開きっぱなしでも日付がずれない。 */
 function currentCtx(){
  const today = todayJst();
@@ -62,6 +69,7 @@ function currentCtx(){
 function refreshCtx(){
  ctx = currentCtx();
  $("#cardDate").textContent = `${ctx.month.replace("-","年")}月 ${periodLabel(ctx.period)}`;
+ document.body.dataset.period = ctx.period;   // 旬に合わせて画面の色を切り替える
  const src = CARD_IMAGE[ctx.period];
  if(!cardImg.src.endsWith(src)) cardImg.src = src;
  $("#rolloverNote").textContent =
@@ -72,12 +80,15 @@ function refreshCtx(){
 }
 refreshCtx();
 
-try{
- await signInAnonymously(auth);
- await loadListeners();
-}catch(err){
- console.error(err);
- message.textContent = "読み込みに失敗しました。通信環境を確認して、ページを再読み込みしてください。";
+/* 起動処理。イベント登録がすべて済んでから末尾で呼び出す。 */
+async function start(){
+ try{
+   await signInAnonymously(auth);
+   await loadListeners();
+ }catch(err){
+   console.error(err);
+   message.textContent = "読み込みに失敗しました。通信環境とFirebaseの設定を確認して、ページを再読み込みしてください。";
+ }
 }
 
 /* activeでの絞り込みはJS側で行う（複合インデックス不要にするため） */
@@ -176,7 +187,7 @@ function showRememberedMode(){
  $("#cardName").textContent = `${selected.name}さんのカード`;
 }
 
-async function renderCard(){
+async function renderCard(keepMessage=false){
  layer.innerHTML = "";
  if(!selected){ message.textContent="お名前を選択してください。"; stampBtn.disabled=true; return }
  refreshCtx();
@@ -192,13 +203,14 @@ async function renderCard(){
      el.className = "stamp";
      el.src = STAMP_IMAGE;
      el.alt = `${a.day}日 出席`;
+     el.onerror = ()=>{ el.onerror=null; el.src=FALLBACK_STAMP; console.warn("assets/apple-stamp.png を読み込めませんでした"); };
      el.style.left = x+"%"; el.style.top = y+"%"; el.style.height = (h*0.94)+"%";
      if(a.date === ctx.today) el.classList.add("justStamped");
      layer.appendChild(el);
    });
-   const exists = await getDoc(doc(db,"attendance",`${ctx.today}_${selected.id}`));
-   message.textContent = exists.exists() ? "今日はすでにハンコ済みです。" : "まだ今日のハンコを押していません。";
-   stampBtn.disabled = exists.exists() || busy;
+   const done = (await getDoc(doc(db,"attendance",`${ctx.today}_${selected.id}`))).exists();
+   if(!keepMessage) message.textContent = done ? "今日はすでにハンコ済みです。" : "まだ今日のハンコを押していません。";
+   stampBtn.disabled = done || busy;
  }catch(err){
    console.error(err);
    message.textContent = "カードの読み込みに失敗しました。ページを再読み込みしてください。";
@@ -211,6 +223,7 @@ stampBtn.addEventListener("click", async()=>{
  if(!selected){ message.textContent="先にお名前を選んでください。"; return }
  busy = true;
  stampBtn.disabled = true;              // 連打による二重登録を防ぐ
+ let stamped = false;
  try{
    refreshCtx();
    const { today, month, day, period } = ctx;
@@ -227,13 +240,14 @@ stampBtn.addEventListener("click", async()=>{
      type:"attendance", listenerId:selected.id, listenerName:selected.name, date:today,
      month, day, period, stampType:stamp, createdAt:serverTimestamp()
    });
-   message.textContent = `${stamp} ハンコを押しました！ 今日もありがとう！`;
+   stamped = true;
+   message.textContent = "🍎 ハンコを押しました！ 今日もありがとう！";
  }catch(err){
    console.error(err);
    message.textContent = "保存できませんでした。通信環境を確認して、もう一度押してください。";
  }finally{
    busy = false;
-   await renderCard();
+   await renderCard(stamped);   // 成功メッセージを消さない
  }
 });
 
@@ -242,4 +256,7 @@ setInterval(async()=>{
  if(busy) return;
  if(currentCtx().today !== ctx.today) await renderCard();
 }, 30000);
+
+/* 起動（イベント登録がすべて済んでから実行する） */
+start();
 </script></main></body></html>

@@ -2,19 +2,13 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>りんごハンコ管理</title><link rel="stylesheet" href="style.css">
 </head><body><main class="shell">
-<nav class="nav"><a href="listener.html">リスナー用</a><a href="public.html">公表ページ</a><a href="obs.html">OBS</a></nav>
+<nav class="nav"><a href="stamp.html">出席ハンコ操作</a><a href="listener.html">リスナー用</a><a href="public.html">公表ページ</a><a href="obs.html">OBS</a></nav>
 <h1>🛠️ りんごハンコ管理</h1>
 
-<section id="loginPanel" class="panel">
-<h2>管理者PIN</h2>
-<input id="pin" type="password" inputmode="numeric" maxlength="4" placeholder="4桁PIN">
-<button id="loginBtn" class="primary">管理画面を開く</button>
-<div id="loginMsg" class="message">管理者PINを入力してください。</div>
-</section>
-
-<div id="adminArea" class="hidden">
-<section class="panel">
-<div class="row"><h2 style="margin:0">リスナー一覧</h2><button id="logoutBtn" class="soft">ログアウト</button></div>
+<div id="adminArea">
+<div id="statusMsg" class="message">読み込み中…</div>
+<section class="panel" style="margin-top:14px">
+<h2>リスナー一覧</h2>
 <div class="grid"><input id="newName" placeholder="表示名"><input id="newKana" placeholder="よみがな（あいうえお順用）"></div>
 <button id="addListener" class="primary">こちらで代理登録する</button>
 <p class="muted">リスナーさんはリスナー用ページから自分で登録できます。ここは代理登録・修正用です。</p>
@@ -58,28 +52,19 @@ let listeners=[];
 
 $("#attMonth").value=monthOf(todayJst()); $("#lfrDate").value=todayJst();
 
-const ADMIN_PIN = "1401";
-try{ await signInAnonymously(auth) }
-catch(err){ console.error(err); $("#loginMsg").textContent="Firebaseへの接続に失敗しました。設定を確認してください。"; }
-
-function openAdmin(){
- $("#loginPanel").classList.add("hidden");
- $("#adminArea").classList.remove("hidden");
- sessionStorage.setItem("appleAdminUnlocked","1");
- loadListeners().then(loadAttendance).then(loadLfr).catch(err=>{
-   console.error(err); alert("データの読み込みに失敗しました。ページを再読み込みしてください。");
- });
+/* ロックなし。開いたらそのまま使えます。 */
+async function start(){
+ try{
+   await signInAnonymously(auth);
+   await loadListeners();
+   await loadAttendance();
+   await loadLfr();
+   $("#statusMsg").classList.add("hidden");
+ }catch(err){
+   console.error(err);
+   $("#statusMsg").textContent = "読み込みに失敗しました。通信環境とFirebaseの設定（匿名ログイン・firebase-config.js・firestore.rules）を確認してください。";
+ }
 }
-$("#loginBtn").onclick=()=>{
- if($("#pin").value===ADMIN_PIN){openAdmin()}
- else{$("#loginMsg").textContent="PINが違います。";}
-};
-$("#pin").addEventListener("keydown",e=>{if(e.key==="Enter")$("#loginBtn").click()});
-$("#logoutBtn").onclick=()=>{
- sessionStorage.removeItem("appleAdminUnlocked");
- location.reload();
-};
-if(sessionStorage.getItem("appleAdminUnlocked")==="1") openAdmin();
 
 async function loadListeners(){
  const snap=await getDocs(query(collection(db,"listeners"),orderBy("kana")));
@@ -159,4 +144,7 @@ $("#cleanEvents").onclick=async()=>{
  }catch(err){ console.error(err); $("#cleanMsg").textContent="削除に失敗しました。もう一度お試しください。"; }
  $("#cleanEvents").disabled=false;
 };
+
+/* 起動（イベント登録がすべて済んでから実行する） */
+start();
 </script></main></body></html>
