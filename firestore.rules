@@ -5,7 +5,20 @@ service cloud.firestore {
 
     match /listeners/{id} {
       allow read: if true;
-      allow create, update, delete: if signedIn();
+
+      // リスナー本人による登録。名前・よみがなの形式を制限する。
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(
+             ["name","kana","active","selfRegistered","createdAt"])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 20
+        && request.resource.data.kana is string
+        && request.resource.data.kana.size() > 0
+        && request.resource.data.kana.size() <= 30
+        && request.resource.data.active == true;
+
+      allow update, delete: if signedIn();
     }
 
     match /attendance/{id} {

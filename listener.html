@@ -6,11 +6,23 @@
 <p class="muted">初回だけお名前を登録します。次回からは出席ボタンを押すだけです。</p>
 <section class="panel">
   <div id="nameSetup">
+    <h2 style="font-size:17px">① 登録ずみの方</h2>
     <div class="grid">
       <label>名前を検索<input id="search" placeholder="名前・よみがな"></label>
       <label>登録済みの名前<select id="listenerSelect"><option value="">選んでください</option></select></label>
     </div>
     <button id="rememberBtn" class="primary" style="width:100%;margin-top:10px">この端末に名前を記憶する</button>
+
+    <div class="regBlock">
+      <h2 style="font-size:17px">② はじめての方</h2>
+      <p class="muted">一覧にお名前が無ければ、ここから登録できます。配信画面やまとめページに表示されます。</p>
+      <div class="grid">
+        <label>お名前<input id="regName" maxlength="20" placeholder="配信で呼ばれている名前"></label>
+        <label>よみがな（任意）<input id="regKana" maxlength="30" placeholder="ひらがなで（あいうえお順に使います）"></label>
+      </div>
+      <button id="regBtn" class="primary" style="width:100%;margin-top:10px">この名前で登録して記憶する</button>
+      <div id="regMsg" class="muted" style="margin-top:8px"></div>
+    </div>
   </div>
   <div id="rememberedName" class="message hidden"></div>
   <button id="changeNameBtn" class="soft hidden" style="margin-top:8px">名前を変更する</button>
@@ -36,7 +48,10 @@ const select=$("#listenerSelect"), search=$("#search"), message=$("#message");
 const layer=$("#stampLayer"), stampBtn=$("#stampBtn"), cardImg=$("#cardImg");
 const SAVED_LISTENER_KEY = "appleStampSavedListenerId";
 
-let listeners=[], selected=null, ctx=null, busy=false;
+let listeners=[], allListeners=[], selected=null, ctx=null, busy=false;
+
+/* 重複判定用：空白を取り除いて小文字化 */
+const normalize = s => String(s ?? "").replace(/[\s\u3000]/g,"").toLowerCase();
 
 /* 日付は「押した瞬間」に計算する。ページを開きっぱなしでも日付がずれない。 */
 function currentCtx(){
@@ -68,7 +83,8 @@ try{
 /* activeでの絞り込みはJS側で行う（複合インデックス不要にするため） */
 async function loadListeners(){
  const snap = await getDocs(query(collection(db,"listeners"), orderBy("kana")));
- listeners = snap.docs.map(d=>({id:d.id,...d.data()})).filter(v=>v.active!==false);
+ allListeners = snap.docs.map(d=>({id:d.id,...d.data()}));
+ listeners = allListeners.filter(v=>v.active!==false);
  renderOptions("");
  const saved = listeners.find(v => v.id === localStorage.getItem(SAVED_LISTENER_KEY));
  if(saved){ selected = saved; showRememberedMode(); await renderCard(); }
@@ -94,12 +110,55 @@ $("#rememberBtn").addEventListener("click", async()=>{
  await renderCard();
 });
 
+$("#regBtn").addEventListener("click", async()=>{
+ const btn = $("#regBtn"), msg = $("#regMsg");
+ const name = $("#regName").value.trim();
+ const kana = $("#regKana").value.trim() || name;   // 未入力なら名前を並び順に使う
+ if(!name){ msg.textContent = "お名前を入力してください。"; return }
+ if(name.length > 20){ msg.textContent = "お名前は20文字までです。"; return }
+
+ const hit = allListeners.find(v => normalize(v.name) === normalize(name));
+ if(hit){
+   if(hit.active === false){
+     msg.textContent = "同じお名前が停止中です。配信のコメントで声をかけてください。";
+     return;
+   }
+   msg.textContent = "同じお名前がすでにあります。そちらを記憶しました。";
+   selected = listeners.find(v => v.id === hit.id) || hit;
+   localStorage.setItem(SAVED_LISTENER_KEY, selected.id);
+   showRememberedMode();
+   await renderCard();
+   return;
+ }
+
+ btn.disabled = true; msg.textContent = "登録中…";
+ try{
+   const ref = await addDoc(collection(db,"listeners"), {
+     name, kana, active:true, selfRegistered:true, createdAt:serverTimestamp()
+   });
+   localStorage.setItem(SAVED_LISTENER_KEY, ref.id);
+   await loadListeners();
+   selected = listeners.find(v => v.id === ref.id) || { id:ref.id, name, kana };
+   showRememberedMode();
+   await renderCard();
+   msg.textContent = "";
+   $("#regName").value = ""; $("#regKana").value = "";
+   message.textContent = `${name}さん、登録できました。ハンコを押してください。`;
+ }catch(err){
+   console.error(err);
+   msg.textContent = "登録できませんでした。通信環境を確認して、もう一度お試しください。";
+ }finally{
+   btn.disabled = false;
+ }
+});
+
 $("#changeNameBtn").addEventListener("click", ()=>{
  localStorage.removeItem(SAVED_LISTENER_KEY);
  selected = null;
  search.value = "";
  renderOptions("");
  select.value = "";
+ $("#regName").value = ""; $("#regKana").value = ""; $("#regMsg").textContent = "";
  $("#nameSetup").classList.remove("hidden");
  $("#rememberedName").classList.add("hidden");
  $("#changeNameBtn").classList.add("hidden");

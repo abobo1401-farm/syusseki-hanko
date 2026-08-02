@@ -14,9 +14,10 @@
 
 <div id="adminArea" class="hidden">
 <section class="panel">
-<div class="row"><h2 style="margin:0">リスナー登録</h2><button id="logoutBtn" class="soft">ログアウト</button></div>
+<div class="row"><h2 style="margin:0">リスナー一覧</h2><button id="logoutBtn" class="soft">ログアウト</button></div>
 <div class="grid"><input id="newName" placeholder="表示名"><input id="newKana" placeholder="よみがな（あいうえお順用）"></div>
-<button id="addListener" class="primary">登録</button>
+<button id="addListener" class="primary">こちらで代理登録する</button>
+<p class="muted">リスナーさんはリスナー用ページから自分で登録できます。ここは代理登録・修正用です。</p>
 <div class="list" id="listenerList"></div>
 </section>
 
@@ -86,7 +87,7 @@ async function loadListeners(){
  const opts='<option value="">リスナーを選択</option>'+listeners.map(v=>`<option value="${v.id}">${escapeHtml(v.name)}</option>`).join("");
  $("#attListener").innerHTML=opts;$("#lfrListener").innerHTML=opts;
  $("#listenerList").innerHTML=listeners.map(v=>`<div class="item">
-   <div><b>${escapeHtml(v.name)}</b><div class="muted">${escapeHtml(v.kana||"")}${v.active===false?"・停止中":""}</div></div>
+   <div><b>${escapeHtml(v.name)}</b>${v.selfRegistered?'<span class="badge">本人登録</span>':""}<div class="muted">${escapeHtml(v.kana||"")}${v.active===false?"・停止中":""}</div></div>
    <div><button class="soft editListener" data-id="${v.id}">修正</button> <button class="danger delListener" data-id="${v.id}">削除</button></div>
  </div>`).join("");
  document.querySelectorAll(".editListener").forEach(b=>b.onclick=()=>editListener(b.dataset.id));
