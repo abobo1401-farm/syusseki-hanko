@@ -26,7 +26,10 @@
     </div>
     <button id="stampBtn" class="red" style="width:100%;font-size:22px;padding:18px" disabled>🍎 出席ハンコを押す</button>
     <div id="message" class="message">読み込み中…</div>
-    <button id="changeNameBtn" class="soft" style="margin-top:10px">名前を変更する</button>
+    <div class="row" style="margin-top:10px">
+      <button id="soundBtn" class="soft">🔊 音あり</button>
+      <button id="changeNameBtn" class="soft">名前を変更する</button>
+    </div>
   </div>
 
   <p class="muted" id="rolloverNote" style="margin-top:12px"></p>
@@ -43,6 +46,19 @@ import {
 const $ = s => document.querySelector(s);
 const message=$("#message"), layer=$("#stampLayer"), stampBtn=$("#stampBtn"), cardImg=$("#cardImg"), card=$("#card");
 const SAVED_LISTENER_KEY = "appleStampSavedListenerId";
+
+/* 効果音の設定。
+   画面のボタンでON/OFFでき、その端末に記憶されます。
+   URLで上書きもできます：?sound=off で無音、?vol=0.5 で音量調整（0〜1、初期値0.3）*/
+const SOUND_KEY = "appleStampSoundOff";
+const _p = new URLSearchParams(location.search);
+const FORCED_OFF = _p.get("sound") === "off";
+const VOLUME = Math.min(1, Math.max(0, Number(_p.get("vol") ?? 0.3))) || 0;
+let soundOn = !FORCED_OFF && localStorage.getItem(SOUND_KEY) !== "1";
+
+function updateSoundBtn(){
+ $("#soundBtn").textContent = soundOn ? "🔊 音あり" : "🔇 音なし";
+}
 
 let listeners=[], allListeners=[], selected=null, ctx=null, busy=false;
 
@@ -139,6 +155,17 @@ $("#regBtn").addEventListener("click", async()=>{
  }
 });
 
+$("#soundBtn").addEventListener("click", ()=>{
+ soundOn = !soundOn;
+ localStorage.setItem(SOUND_KEY, soundOn ? "0" : "1");
+ updateSoundBtn();
+ if(soundOn){                       // ONにした瞬間に試聴できるようにする
+   try{ audioCtx() }catch(err){}
+   playStampSound(VOLUME);
+ }
+});
+updateSoundBtn();
+
 $("#changeNameBtn").addEventListener("click", ()=>{
  if(!confirm("この端末の登録名を消して、別の名前を登録しますか？\n出席の記録は消えません。")) return;
  localStorage.removeItem(SAVED_LISTENER_KEY);
@@ -191,7 +218,7 @@ stampBtn.addEventListener("click", async()=>{
  if(busy || !selected) return;
  busy = true;
  stampBtn.disabled = true;              // 連打による二重登録を防ぐ
- try{ audioCtx() }catch(err){}          // タップの瞬間に音声を起こす（初回無音の対策）
+ if(soundOn){ try{ audioCtx() }catch(err){} }    // タップの瞬間に音声を起こす（初回無音の対策）
  let stamped = false, stampedDay = null;
  try{
    refreshCtx();
@@ -210,7 +237,7 @@ stampBtn.addEventListener("click", async()=>{
      month, day, period, stampType:stamp, createdAt:serverTimestamp()
    });
    stamped = true; stampedDay = day;
-   setTimeout(()=>playStampSound(0.5), 330);   // 着地の瞬間に合わせる
+   if(soundOn) setTimeout(()=>playStampSound(VOLUME), 330);    // 着地の瞬間に合わせる
    message.textContent = `🍎 ${day}日のハンコを押しました！ 今日もありがとう！`;
  }catch(err){
    console.error(err);
