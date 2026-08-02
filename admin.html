@@ -18,6 +18,17 @@
 <section class="panel" style="margin-top:14px">
 <h2>出席記録の修正</h2>
 <div class="grid"><input id="attMonth" type="month"><select id="attListener"><option value="">リスナーを選択</option></select></div>
+
+<div class="regBlock">
+  <h2 style="font-size:17px">出席漏れを後から追加</h2>
+  <p class="muted">押し忘れた日を選んで追加できます。過去の日付でも構いません。OBSの通知は流れません。</p>
+  <div class="grid">
+    <label>追加する日付<input id="addAttDate" type="date"></label>
+    <label>&nbsp;<button id="addAttBtn" class="primary" style="width:100%">この日の出席を追加</button></label>
+  </div>
+  <div id="addAttMsg" class="muted" style="margin-top:8px"></div>
+</div>
+
 <div id="attendanceList" class="list"></div>
 </section>
 
@@ -43,14 +54,15 @@
 
 <script type="module">
 import {
- db, auth, collection, doc, getDocs, addDoc, updateDoc, deleteDoc, query, where, orderBy, limit,
- serverTimestamp, signInAnonymously, todayJst, daysAgoJst, monthOf, periodLabel, escapeHtml
+ db, auth, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
+ query, where, orderBy, limit, serverTimestamp, signInAnonymously,
+ todayJst, daysAgoJst, monthOf, dayOf, periodOf, periodLabel, stampFor, escapeHtml
 } from "./common.js";
 
 const $=s=>document.querySelector(s);
 let listeners=[];
 
-$("#attMonth").value=monthOf(todayJst()); $("#lfrDate").value=todayJst();
+$("#attMonth").value=monthOf(todayJst()); $("#lfrDate").value=todayJst(); $("#addAttDate").value=todayJst();
 
 /* ロックなし。開いたらそのまま使えます。 */
 async function start(){
@@ -102,7 +114,7 @@ async function loadAttendance(){
  if(!month||!id){$("#attendanceList").innerHTML='<div class="muted">月とリスナーを選択してください。</div>';return}
  const snap=await getDocs(query(collection(db,"attendance"),where("listenerId","==",id),where("month","==",month)));
  const rows=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>a.day-b.day);
- $("#attendanceList").innerHTML=rows.length?rows.map(v=>`<div class="item"><div><b>${escapeHtml(v.date)}</b> ${escapeHtml(v.stampType||"")}<div class="muted">${periodLabel(v.period)}</div></div><button class="danger delAtt" data-id="${escapeHtml(v.id)}" data-listener="${escapeHtml(v.listenerId)}" data-date="${escapeHtml(v.date)}">取り消す</button></div>`).join(""):'<div class="muted">記録がありません。</div>';
+ $("#attendanceList").innerHTML=rows.length?rows.map(v=>`<div class="item"><div><b>${escapeHtml(v.date)}</b> ${escapeHtml(v.stampType||"")}${v.addedByAdmin?'<span class="badge">後から追加</span>':""}<div class="muted">${periodLabel(v.period)}・${v.stampNo||"-"}枚目</div></div><button class="danger delAtt" data-id="${escapeHtml(v.id)}" data-listener="${escapeHtml(v.listenerId)}" data-date="${escapeHtml(v.date)}">取り消す</button></div>`).join(""):'<div class="muted">記録がありません。</div>';
  document.querySelectorAll(".delAtt").forEach(b=>b.onclick=async()=>{
    if(!confirm("この日の出席を取り消しますか？OBS通知の履歴も一緒に消します。"))return;
    b.disabled=true;
@@ -114,6 +126,32 @@ async function loadAttendance(){
    await loadAttendance();
  });
 }
+$("#addAttBtn").onclick=async()=>{
+ const btn=$("#addAttBtn"), msg=$("#addAttMsg");
+ const id=$("#attListener").value, v=listeners.find(x=>x.id===id), date=$("#addAttDate").value;
+ if(!v){ msg.textContent="上の「リスナーを選択」で対象を選んでください。"; return }
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){ msg.textContent="日付を入力してください。"; return }
+ const month=monthOf(date), day=dayOf(date), period=periodOf(day);
+ btn.disabled=true; msg.textContent="追加中…";
+ try{
+   const ref=doc(db,"attendance",`${date}_${id}`);
+   if((await getDoc(ref)).exists()){ msg.textContent=`${date} はすでに記録があります。`; return }
+   const snap=await getDocs(query(collection(db,"attendance"),
+     where("listenerId","==",id), where("month","==",month), where("period","==",period)));
+   await setDoc(ref,{
+     listenerId:id, listenerName:v.name, date, month, day, period,
+     stampNo:snap.size+1, stampType:stampFor(), addedByAdmin:true, createdAt:serverTimestamp()
+   });
+   $("#attMonth").value=month;          // 追加した日の月に切り替えて一覧を出す
+   await loadAttendance();
+   msg.textContent=`${v.name}さんの ${date} を追加しました。`;
+ }catch(err){
+   console.error(err); msg.textContent="追加できませんでした。もう一度お試しください。";
+ }finally{
+   btn.disabled=false;
+ }
+};
+
 $("#addLfr").onclick=async()=>{
  const id=$("#lfrListener").value,v=listeners.find(x=>x.id===id);
  if(!v)return alert("リスナーを選択してください");

@@ -1,51 +1,168 @@
 <!doctype html><html lang="ja"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>OBSハンコ通知</title><link rel="stylesheet" href="style.css">
-<style>html,body{background:transparent!important;overflow:hidden}</style>
+<style>
+html,body{background:transparent!important;overflow:hidden}
+
+/* 通知パネル（表示は約5秒） */
+.obsNotice.show{animation:obsPop 5s ease both}
+@keyframes obsPop{
+  0%{opacity:0;transform:scale(.5) rotate(-6deg)}
+  5%{opacity:1;transform:scale(1.06) rotate(2deg)}
+  9%,88%{opacity:1;transform:scale(1) rotate(0)}
+  100%{opacity:0;transform:scale(.92)}
+}
+.obsNotice h1{margin:2px 0 14px}
+.obsNotice h2{margin:14px 0 0}
+
+/* カード本体 */
+.obsCardWrap{position:relative;width:100%;line-height:0}
+.obsCardWrap.hit{animation:cardHit .45s ease 1.15s both}
+@keyframes cardHit{
+  0%,100%{transform:translateY(0) scale(1)}
+  18%{transform:translateY(7px) scale(1.015)}
+  48%{transform:translateY(-4px) scale(.998)}
+}
+.obsCardImg{display:block;width:100%;height:auto;border-radius:16px}
+
+/* 今回押されるハンコ：上から降ってきて着地 */
+.stamp.obsNew{animation:obsStamp .55s cubic-bezier(.2,1.5,.35,1) .95s both}
+@keyframes obsStamp{
+  0%{opacity:0;transform:translate(-50%,-50%) scale(3.8) rotate(-24deg)}
+  35%{opacity:1}
+  62%{opacity:1;transform:translate(-50%,-50%) scale(.84) rotate(6deg)}
+  82%{transform:translate(-50%,-50%) scale(1.07) rotate(-2deg)}
+  100%{opacity:1;transform:translate(-50%,-50%) scale(1) rotate(0)}
+}
+/* 着地の衝撃波 */
+.impactRing{
+  position:absolute;transform:translate(-50%,-50%);
+  width:9%;aspect-ratio:1;border-radius:50%;
+  border:7px solid #ff5f7e;opacity:0;
+  animation:obsRing .65s ease-out 1.2s both
+}
+@keyframes obsRing{
+  0%{opacity:.95;transform:translate(-50%,-50%) scale(.25)}
+  100%{opacity:0;transform:translate(-50%,-50%) scale(3.4)}
+}
+/* すでに押してあるハンコは静かに出す */
+.stamp.obsOld{animation:obsFade .3s ease both}
+@keyframes obsFade{from{opacity:0}to{opacity:1}}
+
+@media(prefers-reduced-motion:reduce){
+  .stamp.obsNew,.impactRing,.obsCardWrap.hit{animation-duration:.01s;animation-delay:0s}
+}
+</style>
 </head><body>
 <div class="obsWrap"><div id="notice" class="obsNotice">
-  <img id="stamp" class="bigStamp" src="assets/apple-stamp.png" alt="">
   <h1 id="name">りんごさん</h1>
+  <div id="cardWrap" class="obsCardWrap">
+    <img id="cardImg" class="obsCardImg" src="assets/card-early.png" alt="">
+    <div id="obsLayer" class="stampLayer"></div>
+  </div>
   <h2 id="text">今日のハンコを押しました！</h2>
 </div></div>
+
 <script type="module">
-import {db,auth,collection,query,orderBy,limit,onSnapshot,signInAnonymously,STAMP_IMAGE} from "./common.js";
+import {
+ db, auth, collection, query, where, orderBy, limit, getDocs, onSnapshot,
+ signInAnonymously, periodLabel, STAMP_IMAGE, CARD_IMAGE, CARD_CELLS
+} from "./common.js";
 
-const notice = document.querySelector("#notice");
-const SHOW_MS = 3200;              // CSSアニメーション3秒＋余白
-let seen = new Set();
-const queue = [];
-let ready = false, playing = false;
+const notice=document.querySelector("#notice");
+const cardWrap=document.querySelector("#cardWrap");
+const cardImg=document.querySelector("#cardImg");
+const layer=document.querySelector("#obsLayer");
+const SHOW_MS = 5200;                 // アニメーション5秒＋余白
 
-/* 読み取りは公開設定だが、将来ルールを締めても動くようサインインを試みる（失敗しても表示は続行） */
-try { await signInAnonymously(auth) } catch(err){ console.warn("匿名サインインなしで続行", err) }
+const FALLBACK_STAMP = "data:image/svg+xml;utf8," + encodeURIComponent(
+ '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' +
+ '<rect x="46" y="8" width="6" height="20" rx="3" fill="#755033"/>' +
+ '<circle cx="50" cy="58" r="38" fill="#d94c4c"/>' +
+ '<ellipse cx="36" cy="45" rx="9" ry="13" fill="#fff" opacity=".35"/></svg>');
 
-function play(){
+let seen = new Set(), queue = [], ready = false, playing = false;
+
+try{ await signInAnonymously(auth) }catch(err){ console.warn("匿名サインインなしで続行", err) }
+
+/* その人のカードの「今の状態」を取ってくる（既存ハンコを並べるため） */
+async function fetchStamped(v){
+ try{
+   const snap = await getDocs(query(collection(db,"attendance"),
+     where("listenerId","==",v.listenerId), where("month","==",v.month), where("period","==",v.period)));
+   return snap.docs.map(d=>d.data().day).filter(d=>Number.isFinite(d));
+ }catch(err){
+   console.warn("カード状態の取得に失敗。今回の1個だけ表示します。", err);
+   return [v.day];
+ }
+}
+
+function makeStamp(day, cells, isNew){
+ const cell = cells[day];
+ if(!cell) return null;
+ const [x,y,,h] = cell;
+ const el = document.createElement("img");
+ el.className = "stamp " + (isNew ? "obsNew" : "obsOld");
+ el.src = STAMP_IMAGE;
+ el.alt = "";
+ el.onerror = ()=>{ el.onerror=null; el.src=FALLBACK_STAMP; };
+ el.style.left = x+"%"; el.style.top = y+"%"; el.style.height = (h*0.94)+"%";
+ return el;
+}
+
+async function play(){
  const v = queue.shift();
  if(!v){ playing = false; return }
  playing = true;
- document.querySelector("#stamp").src = STAMP_IMAGE;
+
+ const period = v.period || "early";
+ const cells = CARD_CELLS[period] || {};
+ cardImg.src = CARD_IMAGE[period] || CARD_IMAGE.early;
  document.querySelector("#name").textContent = `${v.listenerName}さん`;
- document.querySelector("#text").textContent = "今日のハンコを押しました！";
- notice.classList.remove("show"); void notice.offsetWidth; notice.classList.add("show");
+
+ const days = await fetchStamped(v);
+ layer.innerHTML = "";
+
+ // すでに押してある分を先に並べる（今回の日は除く）
+ days.filter(d=>d!==v.day).forEach(d=>{
+   const el = makeStamp(d, cells, false);
+   if(el) layer.appendChild(el);
+ });
+
+ // 今回の1個は上から降らせる。着地点に衝撃波も出す。
+ const cell = cells[v.day];
+ if(cell){
+   const ring = document.createElement("div");
+   ring.className = "impactRing";
+   ring.style.left = cell[0]+"%"; ring.style.top = cell[1]+"%";
+   layer.appendChild(ring);
+   const el = makeStamp(v.day, cells, true);
+   if(el) layer.appendChild(el);
+ }
+
+ const total = new Set([...days, v.day]).size;
+ document.querySelector("#text").textContent =
+   `${periodLabel(period)} ${v.day}日 ハンコGET！（${total}個目）`;
+
+ cardWrap.classList.remove("hit");
+ notice.classList.remove("show");
+ void notice.offsetWidth;                 // アニメーションを頭から再生させる
+ notice.classList.add("show");
+ cardWrap.classList.add("hit");
+
  setTimeout(play, SHOW_MS);
 }
 
-/* limit(10)＋既読IDで、同時に複数人が押しても取りこぼさない */
 const q = query(collection(db,"events"), orderBy("createdAt","desc"), limit(10));
 onSnapshot(q, snap => {
- if(!ready){                       // 起動時の既存分は既読にする（空でも必ずready=true）
-   snap.docs.forEach(d => seen.add(d.id));
-   ready = true;
-   return;
- }
- const fresh = snap.docs.filter(d => !seen.has(d.id));
- snap.docs.forEach(d => seen.add(d.id));
- fresh.reverse().forEach(d => {
+ if(!ready){ snap.docs.forEach(d=>seen.add(d.id)); ready = true; return }
+ const fresh = snap.docs.filter(d=>!seen.has(d.id));
+ snap.docs.forEach(d=>seen.add(d.id));
+ fresh.reverse().forEach(d=>{
    const v = d.data();
    if(v.type === "attendance" && v.createdAt) queue.push(v);
  });
- if(seen.size > 500) seen = new Set(snap.docs.map(d => d.id)); // 長時間配信でのメモリ肥大を防ぐ（再表示は起こさない）
+ if(seen.size > 500) seen = new Set(snap.docs.map(d=>d.id));
  if(!playing) play();
 }, err => console.error("通知の購読に失敗", err));
 </script></body></html>
