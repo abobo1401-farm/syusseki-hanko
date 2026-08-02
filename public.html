@@ -9,16 +9,45 @@
 <div id="summary"></div>
 </section>
 <script type="module">
-import {db,collection,getDocs,query,where,todayJst,monthOf,escapeHtml} from "./common.js";
-const m=document.querySelector("#month");m.value=monthOf(todayJst());
-document.querySelector("#reload").onclick=load;load();
+import {db,auth,collection,getDocs,query,where,orderBy,signInAnonymously,todayJst,monthOf,escapeHtml} from "./common.js";
+
+const m = document.querySelector("#month");
+const summary = document.querySelector("#summary");
+m.value = monthOf(todayJst());
+document.querySelector("#reload").onclick = load;
+
+try { await signInAnonymously(auth) } catch(err){ console.warn("匿名サインインなしで続行", err) }
+load();
+
 async function load(){
- const snap=await getDocs(query(collection(db,"attendance"),where("month","==",m.value)));
- const map={};
- snap.forEach(d=>{const v=d.data();map[v.listenerId]??={name:v.listenerName,total:0,early:0,middle:0,late:0};map[v.listenerId].total++;map[v.listenerId][v.period]++});
- const rows=Object.values(map).sort((a,b)=>b.total-a.total||a.name.localeCompare(b.name,"ja"));
- document.querySelector("#summary").innerHTML=rows.length?`<table><thead><tr><th>順位</th><th>お名前</th><th>合計</th><th>上旬</th><th>中旬</th><th>下旬</th></tr></thead><tbody>${
- rows.map((v,i)=>`<tr><td class="rank">${i+1}</td><td>${escapeHtml(v.name)}</td><td><b>${v.total}回</b></td><td>${v.early}</td><td>${v.middle}</td><td>${v.late}</td></tr>`).join("")
- }</tbody></table>`:'<div class="message">この月の出席記録はまだありません。</div>';
+ if(!/^\d{4}-\d{2}$/.test(m.value)){
+   summary.innerHTML = '<div class="message">月を「2026-08」の形式で指定してください。</div>';
+   return;
+ }
+ summary.innerHTML = '<div class="message">読み込み中…</div>';
+ try{
+   /* 表示名は現在の登録名を優先する（管理画面で改名しても古い名前が残らない） */
+   const nameMap = {};
+   (await getDocs(query(collection(db,"listeners"), orderBy("kana"))))
+     .forEach(d => nameMap[d.id] = d.data().name);
+
+   const snap = await getDocs(query(collection(db,"attendance"), where("month","==",m.value)));
+   const map = {};
+   snap.forEach(d => {
+     const v = d.data();
+     map[v.listenerId] ??= { name: nameMap[v.listenerId] || v.listenerName, total:0, early:0, middle:0, late:0 };
+     map[v.listenerId].total++;
+     map[v.listenerId][v.period]++;
+   });
+   const rows = Object.values(map).sort((a,b)=>b.total-a.total || a.name.localeCompare(b.name,"ja"));
+   summary.innerHTML = rows.length
+     ? `<table><thead><tr><th>順位</th><th>お名前</th><th>合計</th><th>上旬</th><th>中旬</th><th>下旬</th></tr></thead><tbody>${
+         rows.map((v,i)=>`<tr><td class="rank">${i+1}</td><td>${escapeHtml(v.name)}</td><td><b>${v.total}回</b></td><td>${v.early}</td><td>${v.middle}</td><td>${v.late}</td></tr>`).join("")
+       }</tbody></table>`
+     : '<div class="message">この月の出席記録はまだありません。</div>';
+ }catch(err){
+   console.error(err);
+   summary.innerHTML = '<div class="message">読み込みに失敗しました。通信環境を確認して、もう一度「表示」を押してください。</div>';
+ }
 }
 </script></main></body></html>

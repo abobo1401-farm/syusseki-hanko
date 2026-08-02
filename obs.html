@@ -4,24 +4,48 @@
 <style>html,body{background:transparent!important;overflow:hidden}</style>
 </head><body>
 <div class="obsWrap"><div id="notice" class="obsNotice">
-  <div id="stamp" class="bigStamp">🍎</div>
+  <img id="stamp" class="bigStamp" src="assets/apple-stamp.png" alt="">
   <h1 id="name">りんごさん</h1>
   <h2 id="text">今日のハンコを押しました！</h2>
 </div></div>
 <script type="module">
-import {db,collection,query,orderBy,limit,onSnapshot} from "./common.js";
-const notice=document.querySelector("#notice");
-let first=true,lastId="";
-const q=query(collection(db,"events"),orderBy("createdAt","desc"),limit(1));
-onSnapshot(q,snap=>{
- if(snap.empty)return;
- const d=snap.docs[0],v=d.data();
- if(first){first=false;lastId=d.id;return}
- if(d.id===lastId||v.type!=="attendance")return;
- lastId=d.id;
- document.querySelector("#stamp").textContent=v.stampType||"🍎";
- document.querySelector("#name").textContent=`${v.listenerName}さん`;
- document.querySelector("#text").textContent="今日のハンコを押しました！";
- notice.classList.remove("show");void notice.offsetWidth;notice.classList.add("show");
-});
+import {db,auth,collection,query,orderBy,limit,onSnapshot,signInAnonymously,STAMP_IMAGE} from "./common.js";
+
+const notice = document.querySelector("#notice");
+const SHOW_MS = 3200;              // CSSアニメーション3秒＋余白
+let seen = new Set();
+const queue = [];
+let ready = false, playing = false;
+
+/* 読み取りは公開設定だが、将来ルールを締めても動くようサインインを試みる（失敗しても表示は続行） */
+try { await signInAnonymously(auth) } catch(err){ console.warn("匿名サインインなしで続行", err) }
+
+function play(){
+ const v = queue.shift();
+ if(!v){ playing = false; return }
+ playing = true;
+ document.querySelector("#stamp").src = STAMP_IMAGE;
+ document.querySelector("#name").textContent = `${v.listenerName}さん`;
+ document.querySelector("#text").textContent = "今日のハンコを押しました！";
+ notice.classList.remove("show"); void notice.offsetWidth; notice.classList.add("show");
+ setTimeout(play, SHOW_MS);
+}
+
+/* limit(10)＋既読IDで、同時に複数人が押しても取りこぼさない */
+const q = query(collection(db,"events"), orderBy("createdAt","desc"), limit(10));
+onSnapshot(q, snap => {
+ if(!ready){                       // 起動時の既存分は既読にする（空でも必ずready=true）
+   snap.docs.forEach(d => seen.add(d.id));
+   ready = true;
+   return;
+ }
+ const fresh = snap.docs.filter(d => !seen.has(d.id));
+ snap.docs.forEach(d => seen.add(d.id));
+ fresh.reverse().forEach(d => {
+   const v = d.data();
+   if(v.type === "attendance" && v.createdAt) queue.push(v);
+ });
+ if(seen.size > 500) seen = new Set(snap.docs.map(d => d.id)); // 長時間配信でのメモリ肥大を防ぐ（再表示は起こさない）
+ if(!playing) play();
+}, err => console.error("通知の購読に失敗", err));
 </script></body></html>

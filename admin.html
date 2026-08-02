@@ -37,12 +37,19 @@
 <button id="addLfr" class="primary">履歴を追加</button>
 <div id="lfrList" class="list"></div>
 </section>
+
+<section class="panel" style="margin-top:14px">
+<h2>通知履歴の整理</h2>
+<p class="muted">OBS通知用の履歴（events）は押すたびに増え続けます。30日より前の分をまとめて削除します。出席記録は消えません。</p>
+<button id="cleanEvents" class="soft">30日より前の通知履歴を削除</button>
+<div id="cleanMsg" class="message">未実行です。</div>
+</section>
 </div>
 
 <script type="module">
 import {
- db, auth, collection, doc, getDocs, addDoc, updateDoc, deleteDoc, query, where, orderBy,
- serverTimestamp, signInAnonymously, todayJst, monthOf, escapeHtml
+ db, auth, collection, doc, getDocs, addDoc, updateDoc, deleteDoc, query, where, orderBy, limit,
+ serverTimestamp, signInAnonymously, todayJst, daysAgoJst, monthOf, periodLabel, escapeHtml
 } from "./common.js";
 
 const $=s=>document.querySelector(s);
@@ -51,13 +58,16 @@ let listeners=[];
 $("#attMonth").value=monthOf(todayJst()); $("#lfrDate").value=todayJst();
 
 const ADMIN_PIN = "1401";
-await signInAnonymously(auth);
+try{ await signInAnonymously(auth) }
+catch(err){ console.error(err); $("#loginMsg").textContent="Firebaseへの接続に失敗しました。設定を確認してください。"; }
 
 function openAdmin(){
  $("#loginPanel").classList.add("hidden");
  $("#adminArea").classList.remove("hidden");
  sessionStorage.setItem("appleAdminUnlocked","1");
- loadListeners().then(loadAttendance).then(loadLfr);
+ loadListeners().then(loadAttendance).then(loadLfr).catch(err=>{
+   console.error(err); alert("データの読み込みに失敗しました。ページを再読み込みしてください。");
+ });
 }
 $("#loginBtn").onclick=()=>{
  if($("#pin").value===ADMIN_PIN){openAdmin()}
@@ -84,13 +94,15 @@ async function loadListeners(){
 }
 $("#addListener").onclick=async()=>{
  const name=$("#newName").value.trim(),kana=$("#newKana").value.trim();
- if(!name||!kana)return alert("表示名とよみがなを入力してください");
+ if(!name||!kana)return alert("表示名とよみがなを入力してください。よみがなが空だとリスナー画面の一覧に出ません。");
+ if(listeners.some(v=>v.name===name) && !confirm(`「${name}」はすでに登録されています。別人として追加しますか？`))return;
  await addDoc(collection(db,"listeners"),{name,kana,active:true,createdAt:serverTimestamp()});
  $("#newName").value="";$("#newKana").value="";await loadListeners();
 };
 async function editListener(id){
  const v=listeners.find(x=>x.id===id),name=prompt("表示名",v.name),kana=prompt("よみがな",v.kana||"");
  if(name===null||kana===null)return;
+ if(!name.trim()||!kana.trim())return alert("表示名とよみがなは空にできません。");
  const active=confirm("このリスナーを選択肢に表示しますか？\nOK＝表示、キャンセル＝停止");
  await updateDoc(doc(db,"listeners",id),{name:name.trim(),kana:kana.trim(),active});await loadListeners();
 }
@@ -104,19 +116,29 @@ async function loadAttendance(){
  if(!month||!id){$("#attendanceList").innerHTML='<div class="muted">月とリスナーを選択してください。</div>';return}
  const snap=await getDocs(query(collection(db,"attendance"),where("listenerId","==",id),where("month","==",month)));
  const rows=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>a.day-b.day);
- $("#attendanceList").innerHTML=rows.length?rows.map(v=>`<div class="item"><div><b>${v.date}</b> ${v.stampType||""}<div class="muted">${v.period}</div></div><button class="danger delAtt" data-id="${v.id}">取り消す</button></div>`).join(""):'<div class="muted">記録がありません。</div>';
- document.querySelectorAll(".delAtt").forEach(b=>b.onclick=async()=>{if(confirm("この日の出席を取り消しますか？")){await deleteDoc(doc(db,"attendance",b.dataset.id));await loadAttendance()}});
+ $("#attendanceList").innerHTML=rows.length?rows.map(v=>`<div class="item"><div><b>${escapeHtml(v.date)}</b> ${escapeHtml(v.stampType||"")}<div class="muted">${periodLabel(v.period)}</div></div><button class="danger delAtt" data-id="${escapeHtml(v.id)}" data-listener="${escapeHtml(v.listenerId)}" data-date="${escapeHtml(v.date)}">取り消す</button></div>`).join(""):'<div class="muted">記録がありません。</div>';
+ document.querySelectorAll(".delAtt").forEach(b=>b.onclick=async()=>{
+   if(!confirm("この日の出席を取り消しますか？OBS通知の履歴も一緒に消します。"))return;
+   b.disabled=true;
+   try{
+     await deleteDoc(doc(db,"attendance",b.dataset.id));
+     const evs=await getDocs(query(collection(db,"events"),where("listenerId","==",b.dataset.listener),where("date","==",b.dataset.date)));
+     await Promise.all(evs.docs.map(d=>deleteDoc(doc(db,"events",d.id))));
+   }catch(err){ console.error(err); alert("取り消しに失敗しました。もう一度お試しください。"); }
+   await loadAttendance();
+ });
 }
 $("#addLfr").onclick=async()=>{
  const id=$("#lfrListener").value,v=listeners.find(x=>x.id===id);
  if(!v)return alert("リスナーを選択してください");
+ if(!$("#lfrDate").value)return alert("日付を入力してください");
  await addDoc(collection(db,"lfr"),{listenerId:id,listenerName:v.name,date:$("#lfrDate").value,result:$("#lfrResult").value,memo:$("#lfrMemo").value.trim(),createdAt:serverTimestamp()});
  $("#lfrMemo").value="";await loadLfr();
 };
 async function loadLfr(){
- const snap=await getDocs(query(collection(db,"lfr"),orderBy("date","desc")));
+ const snap=await getDocs(query(collection(db,"lfr"),orderBy("date","desc"),limit(200)));
  const rows=snap.docs.map(d=>({id:d.id,...d.data()}));
- $("#lfrList").innerHTML=rows.map(v=>`<div class="item"><div><b>${escapeHtml(v.listenerName)}</b>｜${v.date}｜${escapeHtml(v.result)}<div class="muted">${escapeHtml(v.memo||"")}</div></div><div><button class="soft editLfr" data-id="${v.id}">修正</button> <button class="danger delLfr" data-id="${v.id}">削除</button></div></div>`).join("");
+ $("#lfrList").innerHTML=rows.length?rows.map(v=>`<div class="item"><div><b>${escapeHtml(v.listenerName)}</b>｜${escapeHtml(v.date)}｜${escapeHtml(v.result)}<div class="muted">${escapeHtml(v.memo||"")}</div></div><div><button class="soft editLfr" data-id="${v.id}">修正</button> <button class="danger delLfr" data-id="${v.id}">削除</button></div></div>`).join(""):'<div class="muted">履歴がありません。</div>';
  document.querySelectorAll(".editLfr").forEach(b=>b.onclick=()=>editLfr(rows.find(v=>v.id===b.dataset.id)));
  document.querySelectorAll(".delLfr").forEach(b=>b.onclick=async()=>{if(confirm("削除しますか？")){await deleteDoc(doc(db,"lfr",b.dataset.id));await loadLfr()}});
 }
@@ -125,4 +147,15 @@ async function editLfr(v){
  if(result===null||memo===null)return;
  await updateDoc(doc(db,"lfr",v.id),{result,memo});await loadLfr();
 }
+$("#cleanEvents").onclick=async()=>{
+ const cutoff=daysAgoJst(30);
+ if(!confirm(`${cutoff} より前の通知履歴を削除します。よろしいですか？`))return;
+ $("#cleanEvents").disabled=true;$("#cleanMsg").textContent="削除中…";
+ try{
+   const snap=await getDocs(query(collection(db,"events"),where("date","<",cutoff)));
+   await Promise.all(snap.docs.map(d=>deleteDoc(doc(db,"events",d.id))));
+   $("#cleanMsg").textContent=`${snap.size}件を削除しました。`;
+ }catch(err){ console.error(err); $("#cleanMsg").textContent="削除に失敗しました。もう一度お試しください。"; }
+ $("#cleanEvents").disabled=false;
+};
 </script></main></body></html>
