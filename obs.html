@@ -4,6 +4,26 @@
 <style>
 html,body{background:transparent!important;overflow:hidden}
 
+/* ===== 背景パネルを透過（カードと文字だけを表示） =====
+   枠付きに戻したいときは、URLの末尾に ?panel=on を付けてください。 */
+body:not(.withPanel) .obsNotice{
+  background:transparent;border:0;outline:0;box-shadow:none;padding:0;
+  min-width:0;width:min(96vw,1000px);max-width:none
+}
+body:not(.withPanel) .obsCardImg{
+  filter:drop-shadow(0 8px 14px rgba(0,0,0,.35))
+}
+/* 配信画面の上でも読めるように、文字に白フチを付ける */
+body:not(.withPanel) .obsNotice h1,
+body:not(.withPanel) .obsNotice h2{
+  color:#e03a5f;
+  text-shadow:
+    -3px -3px 0 #fff, 3px -3px 0 #fff, -3px 3px 0 #fff, 3px 3px 0 #fff,
+    -3px 0 0 #fff, 3px 0 0 #fff, 0 -3px 0 #fff, 0 3px 0 #fff,
+    0 6px 10px rgba(0,0,0,.35)
+}
+body:not(.withPanel) .obsNotice h2{color:#5b3f2e;font-size:26px}
+
 /* 通知パネル（表示は約5秒） */
 .obsNotice.show{animation:obsPop 5s ease both}
 @keyframes obsPop{
@@ -66,8 +86,19 @@ html,body{background:transparent!important;overflow:hidden}
 <script type="module">
 import {
  db, auth, collection, query, where, orderBy, limit, getDocs, onSnapshot,
- signInAnonymously, periodLabel, STAMP_IMAGE, CARD_IMAGE, CARD_CELLS
+ signInAnonymously, periodLabel, STAMP_IMAGE, CARD_IMAGE, CARD_CELLS, audioCtx, playStampSound
 } from "./common.js";
+
+const params = new URLSearchParams(location.search);
+
+/* ?panel=on で従来の枠付き表示に戻せる */
+if(params.get("panel") === "on") document.body.classList.add("withPanel");
+
+/* 効果音：?sound=off で無音、?vol=0.4 で音量調整（0〜1、初期値0.7） */
+const SOUND_ON = params.get("sound") !== "off";
+const VOLUME = Math.min(1, Math.max(0, Number(params.get("vol") ?? 0.7))) || 0;
+const IMPACT_MS = 1250;                 // ハンコが着地する瞬間
+try{ audioCtx() }catch(err){}           // 先に音声を起こしておく（初回無音の対策）
 
 const notice=document.querySelector("#notice");
 const cardWrap=document.querySelector("#cardWrap");
@@ -149,6 +180,8 @@ async function play(){
  void notice.offsetWidth;                 // アニメーションを頭から再生させる
  notice.classList.add("show");
  cardWrap.classList.add("hit");
+
+ if(SOUND_ON) setTimeout(()=>playStampSound(VOLUME), IMPACT_MS);
 
  setTimeout(play, SHOW_MS);
 }

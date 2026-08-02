@@ -40,7 +40,7 @@ import {
  db, auth, collection, doc, getDoc, getDocs, setDoc, addDoc, query, where, orderBy,
  serverTimestamp, signInAnonymously, todayJst, calendarTodayJst, monthOf, dayOf,
  periodOf, periodLabel, stampFor, escapeHtml, DAY_ROLLOVER_HOUR,
- STAMP_IMAGE, CARD_IMAGE, CARD_CELLS
+ STAMP_IMAGE, CARD_IMAGE, CARD_CELLS, playStampSound
 } from "./common.js";
 
 const $ = s => document.querySelector(s);
@@ -241,6 +241,7 @@ stampBtn.addEventListener("click", async()=>{
      month, day, period, stampType:stamp, createdAt:serverTimestamp()
    });
    stamped = true;
+   playStampSound(0.5);
    message.textContent = "🍎 ハンコを押しました！ 今日もありがとう！";
  }catch(err){
    console.error(err);

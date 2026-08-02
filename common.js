@@ -103,3 +103,58 @@ export const CARD_CELLS = {
 export const escapeHtml = s => String(s ?? "").replace(/[&<>"']/g, m => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
 }[m]));
+
+/* ===== ハンコの効果音（音声ファイル不要・その場で合成） =====
+   ドン（着地）＋紙に当たる衝撃＋きらりと上がる3音。 */
+let _actx = null;
+export function audioCtx(){
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if(!AC) return null;
+  if(!_actx) _actx = new AC();
+  if(_actx.state === "suspended") _actx.resume().catch(()=>{});
+  return _actx;
+}
+
+export function playStampSound(volume = 0.7){
+  if(volume <= 0) return;
+  let ctx;
+  try{ ctx = audioCtx() }catch(err){ console.warn("音声を初期化できません", err); return }
+  if(!ctx) return;
+  const t = ctx.currentTime;
+  const master = ctx.createGain();
+  master.gain.value = volume;
+  master.connect(ctx.destination);
+
+  // ドン（本体の重み）
+  const osc = ctx.createOscillator(), g = ctx.createGain();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(190, t);
+  osc.frequency.exponentialRampToValueAtTime(55, t + 0.16);
+  g.gain.setValueAtTime(0.9, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+  osc.connect(g).connect(master);
+  osc.start(t); osc.stop(t + 0.3);
+
+  // 紙に当たる音（ノイズを短く）
+  const len = Math.floor(ctx.sampleRate * 0.12);
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  for(let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+  const src = ctx.createBufferSource(); src.buffer = buf;
+  const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 2200;
+  const ng = ctx.createGain(); ng.gain.value = 0.45;
+  src.connect(lp).connect(ng).connect(master);
+  src.start(t);
+
+  // きらり（ド・ミ・ソを上昇）
+  [1046.5, 1318.5, 1568].forEach((f, i) => {
+    const o = ctx.createOscillator(), og = ctx.createGain();
+    const s = t + 0.12 + i * 0.07;
+    o.type = "triangle"; o.frequency.value = f;
+    og.gain.setValueAtTime(0.0001, s);
+    og.gain.exponentialRampToValueAtTime(0.26, s + 0.01);
+    og.gain.exponentialRampToValueAtTime(0.0001, s + 0.22);
+    o.connect(og).connect(master);
+    o.start(s); o.stop(s + 0.25);
+  });
+}
